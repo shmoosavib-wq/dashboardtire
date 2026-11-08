@@ -1,0 +1,28 @@
+{
+  "name": "sababar-bnpl-sales-system",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace bnpl-sales-api",
+    "dev:web": "npm run dev --workspace bnpl-sales-web",
+    "build:api": "npm run build --workspace bnpl-sales-api",
+    "build:web": "npm run build --workspace bnpl-sales-web",
+    "test:unit": "npm run test:unit --workspace bnpl-sales-api",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "test:all": "npm run test:unit && npm run test:smoke",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose stop postgres",
+    "db:generate": "npm run prisma:generate --workspace bnpl-sales-api",
+    "db:migrate": "npm run prisma:migrate --workspace bnpl-sales-api"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.21.5": true,
+    "prisma@6.19.3": true
+  }
+}

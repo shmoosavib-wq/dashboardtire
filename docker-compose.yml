@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bnpl_sales
+      POSTGRES_USER: bnpl_sales
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a local .env file}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - bnpl_sales_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bnpl_sales -d bnpl_sales"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  bnpl_sales_pg:

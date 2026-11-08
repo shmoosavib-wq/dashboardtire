@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.test-artifacts/
+**/*.tsbuildinfo
+.env
+**/.env
+**/private-files/
+.local-db/
+*.log

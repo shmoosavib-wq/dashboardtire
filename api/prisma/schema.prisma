@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SALES_OPERATIONS
+  LEGAL_FINANCE
+  CREDIT_APPROVER
+}
+
+enum WorkflowStage {
+  NEED_DECLARED
+  APP_VERIFICATION
+  CREDIT_REVIEW
+  PROFORMA_PAYMENT_RESERVATION
+  CONTRACT_CHEQUE
+  DELIVERY_FINAL_DOCS
+  COMPLETED
+}
+
+enum DocumentCategory {
+  IDENTITY
+  CREDIT_RESULT
+  PROFORMA
+  CONTRACT
+  CHEQUE
+  DELIVERY
+  SATISFACTION_VIDEO
+  CUSTOM
+}
+
+model User {
+  id           String      @id @default(uuid()) @db.Uuid
+  name         String
+  username     String      @unique
+  passwordHash String
+  roles        UserRole[]  @default([])
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  sessions     Session[]
+  createdCases Driver[]    @relation("DriverCreator")
+  auditEvents  AuditEvent[]
+  drafts       StageDraft[]
+  documents    DriverDocument[]
+  archived     Driver[]    @relation("DriverArchiver")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique
+  userId    String   @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model Driver {
+  id             String        @id @default(uuid()) @db.Uuid
+  fullName       String
+  mobile         String        @unique
+  nationalId     String?       @unique
+  currentStage   WorkflowStage @default(NEED_DECLARED)
+  stageStatus    String        @default("IN_PROGRESS")
+  productHint    String?
+  archivedAt     DateTime?
+  archivedById   String?       @db.Uuid
+  archiveReason  String?
+  createdById    String        @db.Uuid
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  createdBy      User          @relation("DriverCreator", fields: [createdById], references: [id])
+  archivedBy     User?         @relation("DriverArchiver", fields: [archivedById], references: [id])
+  drafts         StageDraft[]
+  documents      DriverDocument[]
+  auditEvents    AuditEvent[]
+  products       DriverProduct[]
+  storeSettlement StoreSettlement?
+
+  @@index([currentStage, archivedAt])
+  @@index([fullName])
+  @@index([nationalId])
+}
+
+model StageDraft {
+  id        String        @id @default(uuid()) @db.Uuid
+  driverId  String        @db.Uuid
+  stage     WorkflowStage
+  payload   Json
+  version   Int           @default(1)
+  updatedById String      @db.Uuid
+  updatedAt DateTime      @updatedAt
+  driver    Driver        @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  updatedBy User          @relation(fields: [updatedById], references: [id])
+
+  @@unique([driverId, stage])
+  @@index([updatedById, updatedAt])
+}
+
+model DriverDocument {
+  id           String           @id @default(uuid()) @db.Uuid
+  driverId     String           @db.Uuid
+  category     DocumentCategory
+  stage        WorkflowStage?
+  customTitle  String?
+  originalName String
+  storageKey   String           @unique
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String           @db.Uuid
+  uploadedAt   DateTime         @default(now())
+  deletedAt    DateTime?
+  driver       Driver           @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  uploadedBy   User             @relation(fields: [uploadedById], references: [id])
+
+  @@index([driverId, category, deletedAt])
+}
+
+model DriverProduct {
+  id            String   @id @default(uuid()) @db.Uuid
+  driverId      String   @db.Uuid
+  title         String
+  quantity      Int      @default(1)
+  saleUnitPrice BigInt?
+  supplyUnitCost BigInt?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  driver        Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId])
+}
+
+model StoreSettlement {
+  id          String   @id @default(uuid()) @db.Uuid
+  driverId    String   @unique @db.Uuid
+  amount      BigInt
+  settledAt   DateTime
+  registeredById String @db.Uuid
+  createdAt   DateTime @default(now())
+  driver      Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([settledAt])
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  driverId  String?  @db.Uuid
+  actorId   String?  @db.Uuid
+  eventType String
+  details   Json
+  createdAt DateTime @default(now())
+  driver    Driver?  @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([driverId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([eventType, createdAt])
+}
