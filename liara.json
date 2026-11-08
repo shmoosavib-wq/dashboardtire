@@ -1,6 +1,5 @@
 {
-  "app": "sabadashboard",
-  "port": 3000,
+  "port": 3001,
   "build": {
     "location": "iran"
   },

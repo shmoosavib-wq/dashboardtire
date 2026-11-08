@@ -7,6 +7,8 @@
     "web"
   ],
   "scripts": {
+    "build": "npm run db:generate && npm run build:api && npm run build:web",
+    "start": "npm run db:migrate:deploy && npm run start:prod",
     "dev:api": "npm run dev --workspace bnpl-sales-api",
     "dev:web": "npm run dev --workspace bnpl-sales-web",
     "build:api": "npm run build --workspace bnpl-sales-api",
