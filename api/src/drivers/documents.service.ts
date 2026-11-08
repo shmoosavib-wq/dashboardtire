@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import type { Response } from 'express';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
@@ -44,6 +45,9 @@ function encodedName(name: string): string {
 @Injectable()
 export class DocumentsService {
   private readonly baseDir = resolve(process.env.FILE_STORAGE_DIR || 'private-files');
+  private readonly storageUrl = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  private readonly storageBucket = process.env.SUPABASE_STORAGE_BUCKET;
+  private readonly storageSecret = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -60,14 +64,21 @@ export class DocumentsService {
     if (file.size > max) throw new UnprocessableEntityException('حجم فایل از حد مجاز بیشتر است.');
     if (!validateSignature(mime, file.buffer)) throw new UnprocessableEntityException('محتوای فایل با نوع اعلام‌شده سازگار نیست.');
     if (input.category === DocumentCategory.CUSTOM && !input.customTitle?.trim()) throw new BadRequestException('برای مدرک متفرقه عنوان وارد کنید.');
-    const storageKey = randomUUID();
+    const remoteStorage = Boolean(this.storageUrl && this.storageBucket && this.storageSecret);
+    if (process.env.NODE_ENV === 'production' && !remoteStorage) {
+      throw new UnprocessableEntityException('File storage is not configured for this deployment.');
+    }
+    const storageKey = remoteStorage ? `${driverId}/${randomUUID()}` : randomUUID();
     const folder = resolve(this.baseDir, driverId);
     const target = resolve(folder, storageKey);
     const rel = relative(folder, target);
     if (rel.startsWith('..' + sep) || rel === '..') throw new BadRequestException('مسیر فایل معتبر نیست.');
     const originalName = safeOriginalName(file.originalname);
-    await mkdir(folder, { recursive: true });
-    await writeFile(target, file.buffer, { flag: 'wx', mode: 0o600 });
+    if (remoteStorage) await this.storageRequest(storageKey, { method: 'POST', headers: { 'Content-Type': mime, 'x-upsert': 'false' }, body: new Uint8Array(file.buffer) });
+    else {
+      await mkdir(folder, { recursive: true });
+      await writeFile(target, file.buffer, { flag: 'wx', mode: 0o600 });
+    }
     try {
       return await this.prisma.$transaction(async (tx) => {
         const document = await tx.driverDocument.create({
@@ -94,7 +105,8 @@ export class DocumentsService {
         return document;
       });
     } catch (error) {
-      await unlink(target).catch(() => undefined);
+      if (remoteStorage) await this.storageRequest(storageKey, { method: 'DELETE' }).catch(() => undefined);
+      else await unlink(target).catch(() => undefined);
       throw error;
     }
   }
@@ -102,6 +114,16 @@ export class DocumentsService {
   async download(driverId: string, documentId: string, actor: AuthenticatedUser, response: Response) {
     const doc = await this.prisma.driverDocument.findFirst({ where: { id: documentId, driverId, deletedAt: null } });
     if (!doc) throw new NotFoundException('فایل پیدا نشد.');
+    if (this.storageUrl && this.storageBucket && this.storageSecret) {
+      await this.prisma.auditEvent.create({ data: { driverId, actorId: actor.id, eventType: 'DOCUMENT_DOWNLOADED', details: { documentId: doc.id, category: doc.category } } });
+      response.setHeader('Content-Type', doc.mimeType);
+      response.setHeader('Content-Length', String(doc.sizeBytes));
+      response.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodedName(doc.originalName));
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      const stored = await this.storageRequest(doc.storageKey);
+      if (!stored.body) throw new NotFoundException('Stored file not found.');
+      return new StreamableFile(Readable.fromWeb(stored.body as import('node:stream/web').ReadableStream));
+    }
     const folder = resolve(this.baseDir, driverId);
     const filePath = resolve(folder, doc.storageKey);
     const rel = relative(folder, filePath);
@@ -114,6 +136,17 @@ export class DocumentsService {
     response.setHeader('Content-Disposition', 'attachment; filename*=UTF-8\'\'' + encodedName(doc.originalName));
     response.setHeader('X-Content-Type-Options', 'nosniff');
     return new StreamableFile(createReadStream(filePath));
+  }
+
+  private async storageRequest(storageKey: string, init: RequestInit = {}) {
+    if (!this.storageUrl || !this.storageBucket || !this.storageSecret) throw new Error('Remote file storage is not configured');
+    const path = storageKey.split('/').map(encodeURIComponent).join('/');
+    const response = await fetch(`${this.storageUrl}/storage/v1/object/${encodeURIComponent(this.storageBucket)}/${path}`, {
+      ...init,
+      headers: { apikey: this.storageSecret, Authorization: `Bearer ${this.storageSecret}`, ...init.headers },
+    });
+    if (!response.ok) throw new Error(`Remote file storage returned ${response.status}`);
+    return response;
   }
 
   async remove(driverId: string, documentId: string, actor: AuthenticatedUser) {
