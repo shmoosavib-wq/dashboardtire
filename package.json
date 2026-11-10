@@ -14,7 +14,7 @@
     "build:api": "npm run build --workspace bnpl-sales-api",
     "build:web": "npm run build --workspace bnpl-sales-web",
     "start:prod": "npm run start --workspace bnpl-sales-api",
-    "test:unit": "npm run test:unit --workspace bnpl-sales-api",
+    "test:unit": "npm run test:unit --workspace bnpl-sales-api && npm run test:unit --workspace bnpl-sales-web",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:all": "npm run test:unit && npm run test:smoke",
     "db:up": "docker compose up -d postgres",

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, displayDateTime, faNumber } from './api';
+import LoadingIndicator from './LoadingIndicator';
 
 type EventRow = {
   id: string; eventType: string; details: Record<string, unknown>; createdAt: string;
@@ -59,7 +60,7 @@ export default function AuditPage() {
     </form>
     {error && <div className="alert error">{error}</div>}
     <div className="table-wrap"><table className="data-table audit-table"><thead><tr><th>زمان</th><th>کاربر</th><th>رویداد</th><th>پرونده</th><th>جزئیات ثبت</th></tr></thead><tbody>
-      {loading ? <tr><td colSpan={5}><div className="empty-state"><span className="spinner" />در حال دریافت رویدادها…</div></td></tr>
+      {loading ? <tr><td colSpan={5}><div className="empty-state"><LoadingIndicator label="در حال دریافت رویدادها…" compact /></div></td></tr>
         : result.items.map((event) => <tr key={event.id}><td>{displayDateTime(event.createdAt)}</td><td>{event.actor?.name || 'سامانه'}</td><td><span className="audit-event">{labels[event.eventType] || event.eventType.replace(/^WORKFLOW_/, 'اقدام گردش: ')}</span></td><td>{event.driver ? <div className="audit-driver"><b>{event.driver.fullName}</b><small>{event.driver.mobile}</small></div> : '—'}</td><td className="audit-details">{format(event.details)}</td></tr>)}
       {!loading && !result.items.length && <tr><td colSpan={5}><div className="empty-state">رویدادی با این مشخصات پیدا نشد.</div></td></tr>}
     </tbody></table></div>

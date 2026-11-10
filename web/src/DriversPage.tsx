@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { api, asciiDigits, displayDate, faDigits, faNumber, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
+import LoadingIndicator from './LoadingIndicator';
 
 type Mode = 'flow' | 'drivers' | 'archive';
 const statusNames: Record<string, string> = {
@@ -77,7 +78,7 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
         <table className="data-table">
           <thead><tr><th>راننده</th><th>کالا</th><th>مرحله فعلی</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>آخرین تغییر</th><th>اقدام</th></tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={7}><div className="empty-state"><span className="spinner" />در حال دریافت پرونده‌ها…</div></td></tr>
+            {loading ? <tr><td colSpan={7}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
               : drivers.length === 0 ? <tr><td colSpan={7}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${stageList.find((item) => item.id === selectedStage)?.compact}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
               : drivers.map((driver) => {
                 const stage = stageList.find((item) => item.id === driver.currentStage);

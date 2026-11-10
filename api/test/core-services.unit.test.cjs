@@ -24,6 +24,42 @@ test('workflow validation accepts Persian numbers and rejects invalid amounts an
   assert.throws(() => nonEmptyText('  ', 'text'), BadRequestException);
 });
 
+test('zero is a valid non-negative count in every supported digit set', () => {
+  assert.equal(nonNegativeInteger(0, 'count'), 0);
+  assert.equal(nonNegativeInteger('0', 'count'), 0);
+  assert.equal(nonNegativeInteger(String.fromCharCode(0x06f0), 'count'), 0);
+  assert.equal(nonNegativeInteger(String.fromCharCode(0x0660), 'count'), 0);
+});
+
+test('credit review accepts zero trips and transport payments and submits them for approval', async () => {
+  let driver = { id: 'driver-1', currentStage: 'CREDIT_REVIEW', stageStatus: 'IN_PROGRESS', archivedAt: null };
+  let submittedPayload;
+  const tx = {
+    driver: {
+      updateMany: async ({ data }) => { driver = { ...driver, ...data }; return { count: 1 }; },
+      findUnique: async () => driver,
+    },
+    stageDraft: { upsert: async ({ create }) => { submittedPayload = create.payload; } },
+    auditEvent: { create: async () => undefined },
+  };
+  const prisma = {
+    driver: { findUnique: async () => driver },
+    stageDraft: { findUnique: async () => null },
+    $transaction: async (callback) => callback(tx),
+  };
+  const result = await new DriversService(prisma).action('driver-1', {
+    action: 'SUBMIT_CREDIT',
+    payload: {
+      sababarTrips: String.fromCharCode(0x06f0), transportPayments: '0', lastWaybillDate: '2026-11-10',
+      bankRank: 'A', suggestedLimit: '1000000',
+    },
+  }, actor('sales', 'SALES_OPERATIONS'));
+
+  assert.equal(result.stageStatus, 'AWAITING_CREDIT_APPROVAL');
+  assert.equal(submittedPayload.sababarTrips, String.fromCharCode(0x06f0));
+  assert.equal(submittedPayload.transportPayments, '0');
+});
+
 test('role policy permits the assigned role and super admin, and denies unrelated roles', () => {
   requireRole(actor('sales', 'SALES_OPERATIONS'), 'SALES_OPERATIONS');
   requireRole(actor('admin', 'SUPER_ADMIN'), 'LEGAL_FINANCE');

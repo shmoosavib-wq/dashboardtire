@@ -4,6 +4,7 @@ import AuditPage from './AuditPage';
 import AuthScreen from './AuthScreen';
 import DriverPanel from './DriverPanel';
 import DriversPage from './DriversPage';
+import LoadingIndicator from './LoadingIndicator';
 import UsersPage from './UsersPage';
 import { can, roleNames, type Stage, type User } from './model';
 
@@ -45,7 +46,7 @@ export default function App() {
   }
 
   if (initialized === null) {
-    return <main className="boot-screen"><img src="/sababar-logo.png" alt="" /><h1>در حال اتصال به سامانه</h1>{bootError && <><p>{bootError}</p><button className="btn" onClick={() => void loadSession()}>تلاش دوباره</button></>}</main>;
+    return <main className="boot-screen"><img src="/sababar-logo.png" alt="" /><h1>در حال اتصال به سامانه</h1><LoadingIndicator label="در حال آماده‌سازی فضای کار شما…" />{bootError && <><p>{bootError}</p><button className="btn" onClick={() => void loadSession()}>تلاش دوباره</button></>}</main>;
   }
   if (!user) return <AuthScreen initialized={initialized} onLogin={setUser} />;
 

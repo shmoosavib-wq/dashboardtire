@@ -44,6 +44,10 @@ export function asciiDigits(value: string) {
   });
 }
 
+export function normalizeIntegerInput(value: string) {
+  return asciiDigits(value).replace(/[^\d]/g, '');
+}
+
 export function displayDate(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
@@ -85,17 +89,21 @@ export function fromPersianDate(input: string) {
   if (jm < 1 || jm > 12 || jd < 1 || jd > (jm <= 6 ? 31 : jm <= 11 ? 30 : 30)) return '';
   const target = jy * 12 + jm - 1;
   const formatter = new Intl.DateTimeFormat('en-u-ca-persian-nu-latn', { year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC' });
-  let low = Date.UTC(jy + 621, 2, 1, 12), high = Date.UTC(jy + 622, 3, 1, 12);
-  while (high - low > 86400000) {
-    const mid = Math.floor((low + high) / 2 / 86400000) * 86400000 + 43200000;
-    const parts = formatter.formatToParts(new Date(mid));
+  const dayMs = 86400000;
+  let low = Math.floor(Date.UTC(jy + 621, 0, 1) / dayMs);
+  let high = Math.floor(Date.UTC(jy + 622, 11, 31) / dayMs);
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    const parts = formatter.formatToParts(new Date(mid * dayMs + 43200000));
     const y = Number(parts.find((p) => p.type === 'year')?.value);
     const m = Number(parts.find((p) => p.type === 'month')?.value);
-    if (y * 12 + m - 1 < target) low = mid + 86400000; else high = mid;
+    if (y * 12 + m - 1 < target) low = mid + 1; else high = mid;
   }
-  const firstParts = formatter.formatToParts(new Date(high));
-  const firstDay = Number(firstParts.find((p) => p.type === 'day')?.value);
-  const result = new Date(high + (jd - firstDay - 1) * 86400000);
+  const firstParts = formatter.formatToParts(new Date(low * dayMs + 43200000));
+  const firstYear = Number(firstParts.find((p) => p.type === 'year')?.value);
+  const firstMonth = Number(firstParts.find((p) => p.type === 'month')?.value);
+  if (firstYear !== jy || firstMonth !== jm) return '';
+  const result = new Date((low + jd - 1) * dayMs + 43200000);
   const check = formatter.formatToParts(result);
   if (Number(check.find((p) => p.type === 'year')?.value) !== jy || Number(check.find((p) => p.type === 'month')?.value) !== jm || Number(check.find((p) => p.type === 'day')?.value) !== jd) return '';
   return result.toISOString().slice(0, 10);

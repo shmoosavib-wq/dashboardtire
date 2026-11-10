@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, displayDateTime, faDigits, faNumber, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
+import LoadingIndicator from './LoadingIndicator';
 import { statusLabel } from './driver-panel/labels';
 import { actionButtons, categoriesFor, Field, responsibleName, stageFields } from './driver-panel/stage-ui';
 import { ArchiveModal, DocumentsTab, HistoryTab, PurchaseSummary, SettlementModal, SettlementTab, UploadButton } from './driver-panel/records';
@@ -75,7 +76,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
     finally { setBusy(false); }
   }
 
-  if (!driver) return viewMode === 'dossier' ? <div className="dossier-loading"><span className="spinner" />در حال بارگذاری پرونده…{error && <div className="alert error">{error}</div>}</div> : <div className="workflow-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="workflow-dialog workflow-loading-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-loading-title"><header className="workflow-dialog-head"><div><span className="eyebrow">اقدام روی پرونده راننده</span><h2 id="workflow-loading-title">در حال بارگذاری مرحله</h2></div><button className="icon-button" onClick={onClose} aria-label="بستن">×</button></header><div className="workflow-dialog-body"><div className="workflow-loading"><span className="spinner" />{error ? <div className="alert error" role="alert">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div> : <span>در حال دریافت اطلاعات پرونده…</span>}</div></div></section></div>;
+  if (!driver) return viewMode === 'dossier' ? <div className="dossier-loading"><LoadingIndicator label="در حال بارگذاری پرونده…" />{error && <div className="alert error">{error}</div>}</div> : <div className="workflow-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><section className="workflow-dialog workflow-loading-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-loading-title"><header className="workflow-dialog-head"><div><span className="eyebrow">اقدام روی پرونده راننده</span><h2 id="workflow-loading-title">در حال بارگذاری مرحله</h2></div><button className="icon-button" onClick={onClose} aria-label="بستن">×</button></header><div className="workflow-dialog-body"><div className="workflow-loading">{error ? <div className="alert error" role="alert">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div> : <LoadingIndicator label="در حال دریافت اطلاعات پرونده…" />}</div></div></section></div>;
   const stageIndex = stageList.findIndex((item) => item.id === driver.currentStage);
   const activeTab = stageList.find((item) => item.id === driver.currentStage)?.title || 'پرونده';
   const drafts = driver.drafts || [];
@@ -163,7 +164,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
               const editablePaymentConfirmation = field.name === 'paymentReceivedConfirmed' && financeReview;
               const waitingForFinance = driver.currentStage === 'PROFORMA_PAYMENT_RESERVATION' && driver.stageStatus === 'AWAITING_PAYMENT_CONFIRMATION';
               const readOnly = !canEdit || (readOnlyReview && !editablePaymentConfirmation) || (waitingForFinance && !editablePaymentConfirmation) || (creditReview && creditEntryField) || (contractReview && !['contractChecked', 'chequeChecked', 'chequeAmount', 'chequeNumber', 'chequeDueDate'].includes(field.name));
-              return <Field key={field.name} field={field} value={payload[field.name]} disabled={readOnly} onChange={(value) => setPayload((old) => ({ ...old, [field.name]: value }))} />;
+              return <Field key={field.name} field={field} value={payload[field.name]} disabled={readOnly} onChange={(value) => { setError(''); setPayload((old) => ({ ...old, [field.name]: value })); }} />;
             })}</div>
             {!isArchived && fileCategories.length > 0 && <section className="stage-docs"><div className="section-head"><div><h4>{'\u0645\u062f\u0627\u0631\u06a9 \u0627\u06cc\u0646 \u0645\u0631\u062d\u0644\u0647'}</h4><p>{'\u0641\u0627\u06cc\u0644\u200c\u0647\u0627 \u0628\u0644\u0627\u0641\u0627\u0635\u0644\u0647 \u062b\u0628\u062a \u0645\u06cc\u200c\u0634\u0648\u0646\u062f \u0648 \u062f\u0631 \u067e\u0631\u0648\u0646\u062f\u0647 \u0628\u0627\u0642\u06cc \u0645\u06cc\u200c\u0645\u0627\u0646\u0646\u062f.'}</p></div></div><div className="upload-row">{fileCategories.map((category) => <UploadButton key={category} category={category} driver={driver} user={user} onUploaded={load} notify={notify} />)}</div></section>}
             {driver.stageStatus === 'CREDIT_REJECTED' && <div className="rejected-note"><span>!</span><div><b>{'\u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0627\u0639\u062a\u0628\u0627\u0631 \u0631\u062f \u0634\u062f\u0647 \u0627\u0633\u062a.'}</b><small>{String(payload.decisionNote || 'یادداشتی ثبت نشده است.')}</small></div></div>}

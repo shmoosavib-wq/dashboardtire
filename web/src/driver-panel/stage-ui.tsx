@@ -1,4 +1,4 @@
-import { asciiDigits, faDigits, faNumber, formatMoney } from '../api';
+import { faDigits, faNumber, formatMoney, normalizeIntegerInput } from '../api';
 import { can, type Driver, type Stage, type User } from '../model';
 import PersianDatePicker from './PersianDatePicker';
 
@@ -88,7 +88,7 @@ function Field({ field, value, disabled, onChange }: { field: FieldDef; value: u
   const text = value === undefined || value === null ? '' : String(value);
   if (field.kind === 'check') return <label className={'check-field ' + (field.wide ? 'wide' : '')}><input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} /><span className="custom-check" /><span>{field.label}</span></label>;
   if (field.kind === 'textarea') return <label className={'field ' + (field.wide ? 'wide' : '')}>{field.label}<textarea rows={3} maxLength={2000} disabled={disabled} value={text} onChange={(e) => onChange(e.target.value)} placeholder={field.placeholder} /></label>;
-  if (field.kind === 'money' || field.kind === 'number') return <label className={'field ' + (field.wide ? 'wide' : '')}>{field.label}<div className="input-unit"><input type="text" inputMode="numeric" disabled={disabled} value={field.kind === 'money' ? formatMoney(text) : faDigits(text)} onChange={(e) => onChange(asciiDigits(e.target.value).replace(/[^\d]/g, ''))} placeholder="۰" /><span>{field.kind === 'money' ? 'تومان' : 'عدد'}</span></div></label>;
+  if (field.kind === 'money' || field.kind === 'number') return <label className={'field ' + (field.wide ? 'wide' : '')}>{field.label}<div className="input-unit"><input type="text" inputMode="numeric" disabled={disabled} value={field.kind === 'money' ? formatMoney(text) : faDigits(text)} onChange={(e) => onChange(normalizeIntegerInput(e.target.value))} placeholder="۰" /><span>{field.kind === 'money' ? 'تومان' : 'عدد'}</span></div></label>;
   if (field.kind === 'date') return <label className={'field ' + (field.wide ? 'wide' : '')}>{field.label}<PersianDatePicker value={text} disabled={disabled} onChange={onChange} /></label>;
   return <label className={'field ' + (field.wide ? 'wide' : '')}>{field.label}<input type="text" disabled={disabled} value={text} onChange={(e) => onChange(e.target.value)} placeholder={field.placeholder} /></label>;
 }
