@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { mkdtemp, rm } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 const { BadRequestException, ConflictException, ForbiddenException, HttpException, UnprocessableEntityException } = require('@nestjs/common');
 const { AuditQueryService } = require('../dist/audit/audit.service.js');
 const { AuthService } = require('../dist/auth/auth.service.js');
@@ -262,6 +265,34 @@ test('document upload rejects a forged PDF signature before writing to storage',
     originalname: 'invoice.pdf', mimetype: 'application/pdf', size: 12, buffer: Buffer.from('<html>fake</html>'),
   }, actor('sales', 'SALES_OPERATIONS')), UnprocessableEntityException);
   assert.equal(transactionOpened, false);
+});
+
+test('document upload restores UTF-8 Persian multipart filenames before saving metadata', async () => {
+  const previousStorageDir = process.env.FILE_STORAGE_DIR;
+  const storageDir = await mkdtemp(join(tmpdir(), 'bnpl-upload-'));
+  process.env.FILE_STORAGE_DIR = storageDir;
+  let createArgs;
+  const prisma = {
+    driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null, currentStage: 'NEED_DECLARED' }) },
+    $transaction: async (callback) => callback({
+      driverDocument: { create: async (args) => { createArgs = args; return { id: 'doc-1', ...args.data }; } },
+      auditEvent: { create: async () => undefined },
+    }),
+  };
+  try {
+    const expectedName = String.fromCodePoint(1605, 1583, 1585, 1705, 32, 1602, 1585, 1575, 1585, 1583, 1575, 1583) + '.pdf';
+    const originalName = Buffer.from(expectedName, 'utf8').toString('latin1');
+    const service = new DocumentsService(prisma);
+    const fileBuffer = Buffer.from('%PDF-1.7');
+    await service.upload('driver-1', { category: 'PROFORMA' }, {
+      originalname: originalName, mimetype: 'application/pdf', size: fileBuffer.length, buffer: fileBuffer,
+    }, actor('sales', 'SALES_OPERATIONS'));
+    assert.equal(createArgs.data.originalName, expectedName);
+  } finally {
+    if (previousStorageDir === undefined) delete process.env.FILE_STORAGE_DIR;
+    else process.env.FILE_STORAGE_DIR = previousStorageDir;
+    await rm(storageDir, { recursive: true, force: true });
+  }
 });
 
 test('document removal uses a soft delete and leaves an audit trail', async () => {

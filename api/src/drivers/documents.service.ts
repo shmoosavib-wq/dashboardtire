@@ -35,7 +35,12 @@ function validateSignature(mime: string, buffer: Buffer): boolean {
 }
 
 function safeOriginalName(input: string): string {
-  const name = input.split(/[\\/]/).pop() || 'document';
+  // Multer/Busboy decodes legacy multipart filename bytes as Latin-1; browsers send UTF-8 bytes.
+  const utf8Name = Buffer.from(input, 'latin1').toString('utf8');
+  const decoded = utf8Name !== input && Buffer.from(utf8Name, 'utf8').toString('latin1') === input
+    ? utf8Name
+    : input;
+  const name = decoded.split(/[\\/]/).pop() || 'document';
   return name.replace(/[\u0000-\u001f\u007f";]/g, '_').slice(0, 180) || 'document';
 }
 
