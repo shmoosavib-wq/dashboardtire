@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { BadRequestException, ForbiddenException, HttpException, UnprocessableEntityException } = require('@nestjs/common');
+const { BadRequestException, ConflictException, ForbiddenException, HttpException, UnprocessableEntityException } = require('@nestjs/common');
 const { AuditQueryService } = require('../dist/audit/audit.service.js');
 const { AuthService } = require('../dist/auth/auth.service.js');
 const { DocumentsService } = require('../dist/drivers/documents.service.js');
@@ -93,6 +93,54 @@ test('driver draft saves merge partial data and audit only changed field names',
   assert.deepEqual(audit[0].data.details.changedKeys, ['ownerVerified']);
   assert.equal(audit[0].data.actorId, 'sales');
   assert.equal(result.version, 3);
+});
+
+test('previous-stage corrections preserve the current stage and write a correction audit event', async () => {
+  const driver = { id: 'driver-1', archivedAt: null, currentStage: 'CREDIT_REVIEW', stageStatus: 'IN_PROGRESS' };
+  const storedDraft = { id: 'draft-1', payload: { smartFleetNumber: 'SF-1', ownerVerified: false }, version: 2 };
+  let updateArgs;
+  const audit = [];
+  const tx = {
+    stageDraft: {
+      findUnique: async () => storedDraft,
+      updateMany: async (args) => { updateArgs = args; return { count: 1 }; },
+      findUniqueOrThrow: async () => ({ ...storedDraft, ...updateArgs.data, version: 3 }),
+    },
+    auditEvent: { create: async (args) => audit.push(args) },
+  };
+  const prisma = { driver: { findUnique: async () => driver }, $transaction: async (callback) => callback(tx) };
+  const result = await new DriversService(prisma).saveDraft('driver-1', {
+    stage: 'APP_VERIFICATION', payload: { ownerVerified: true },
+  }, actor('sales', 'SALES_OPERATIONS'));
+
+  assert.deepEqual(updateArgs.data.payload, { smartFleetNumber: 'SF-1', ownerVerified: true });
+  assert.equal(result.version, 3);
+  assert.equal(driver.currentStage, 'CREDIT_REVIEW');
+  assert.equal(driver.stageStatus, 'IN_PROGRESS');
+  assert.equal(audit[0].data.eventType, 'STAGE_DRAFT_CORRECTED');
+  assert.deepEqual(audit[0].data.details, {
+    stage: 'APP_VERIFICATION', changedKeys: ['ownerVerified'], version: 3, currentStage: 'CREDIT_REVIEW',
+  });
+  assert.equal(JSON.stringify(audit[0].data.details).includes('SF-1'), false);
+});
+
+test('previous-stage correction requires a saved stage draft and cannot edit completed dossiers', async () => {
+  const tx = { stageDraft: { findUnique: async () => null }, auditEvent: { create: async () => undefined } };
+  const active = new DriversService({
+    driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null, currentStage: 'CREDIT_REVIEW' }) },
+    $transaction: async (callback) => callback(tx),
+  });
+  await assert.rejects(active.saveDraft('driver-1', {
+    stage: 'APP_VERIFICATION', payload: { ownerVerified: true },
+  }, actor('sales', 'SALES_OPERATIONS')), ConflictException);
+
+  const completed = new DriversService({
+    driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null, currentStage: 'COMPLETED' }) },
+    $transaction: async () => { throw new Error('transaction should not start'); },
+  });
+  await assert.rejects(completed.saveDraft('driver-1', {
+    stage: 'DELIVERY_FINAL_DOCS', payload: { goodsDelivered: true },
+  }, actor('sales', 'SALES_OPERATIONS')), ConflictException);
 });
 
 test('driver draft rejects unknown fields before opening a transaction', async () => {

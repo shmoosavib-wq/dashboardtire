@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { api, asciiDigits, displayDate, faDigits, faNumber, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
 import LoadingIndicator from './LoadingIndicator';
+import TablePagination from './TablePagination';
 
 type Mode = 'flow' | 'drivers' | 'archive';
 const statusNames: Record<string, string> = {
@@ -35,6 +36,8 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   async function load() {
     setLoading(true); setError('');
@@ -56,8 +59,13 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 160); return () => window.clearTimeout(timer); }, [search, selectedStage, mode, refreshToken]);
 
   const heading = mode === 'flow' ? 'پیگیری گردش فروش' : mode === 'archive' ? 'پرونده‌های آرشیوشده' : 'پرونده رانندگان';
+  useEffect(() => { setPage(1); }, [search, selectedStage, mode]);
+
   const canCreate = mode !== 'archive' && can(user, 'SALES_OPERATIONS');
   const visibleStages = useMemo(() => stageList, []);
+  const totalPages = Math.max(1, Math.ceil(drivers.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageDrivers = drivers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="page-stack">
@@ -76,14 +84,14 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
       <div className="table-wrap">
         <table className="data-table">
-          <thead><tr><th>راننده</th><th>کالا</th><th>مرحله فعلی</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>آخرین تغییر</th><th>اقدام</th></tr></thead>
+          <thead><tr><th>#</th><th>راننده</th><th>کالا</th><th>مرحله فعلی</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>آخرین تغییر</th><th>اقدام</th></tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={7}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
-              : drivers.length === 0 ? <tr><td colSpan={7}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${stageList.find((item) => item.id === selectedStage)?.compact}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
-              : drivers.map((driver) => {
+            {loading ? <tr><td colSpan={8}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
+              : drivers.length === 0 ? <tr><td colSpan={8}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${stageList.find((item) => item.id === selectedStage)?.compact}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
+              : pageDrivers.map((driver, index) => {
                 const stage = stageList.find((item) => item.id === driver.currentStage);
                 return <tr key={driver.id} onDoubleClick={() => onOpen(driver.id)}>
-                  <td><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.nationalId ? ' · ' + faDigits(driver.nationalId) : ''}</small></div></div></td>
+                  <td className="row-number">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.nationalId ? ' · ' + faDigits(driver.nationalId) : ''}</small></div></div></td>
                   <td>{driver.productHint || '—'}</td>
                   <td><span className="stage-label"><i>{driver.currentStage === 'COMPLETED' ? '✓' : faNumber(stageList.findIndex((item) => item.id === driver.currentStage) + 1, { minimumIntegerDigits: 2 })}</i>{stage?.title || 'تکمیل‌شده'}</span></td>
                   <td><span className={'status-pill ' + (driver.stageStatus === 'COMPLETED' ? 'success' : driver.stageStatus.includes('REJECTED') ? 'warning' : '')}>{statusNames[driver.stageStatus] || statusNames[driver.currentStage] || driver.stageStatus}</span></td>
@@ -95,6 +103,7 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
           </tbody>
         </table>
       </div>
+      {!loading && drivers.length > 0 && <TablePagination page={currentPage} pageSize={pageSize} total={drivers.length} itemLabel="راننده" onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} />}
       {showCreate && <CreateDriverModal onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); void load(); notify('پرونده متقاضی ثبت شد.'); }} />}
     </div>
   );

@@ -10,7 +10,7 @@ const statusLabel: Record<string, string> = {
   COMPLETED: 'پرونده فروش تکمیل شد',
 };
 const actionNames: Record<string, string> = {
-  DRIVER_CREATED: 'پرونده راننده ایجاد شد', STAGE_DRAFT_SAVED: 'پیش‌نویس مرحله ذخیره شد',
+  DRIVER_CREATED: 'پرونده راننده ایجاد شد', STAGE_DRAFT_SAVED: 'پیش‌نویس مرحله ذخیره شد', STAGE_DRAFT_CORRECTED: 'اطلاعات مرحلهٔ قبلی اصلاح شد',
   DOCUMENT_UPLOADED: 'مدرک بارگذاری شد', DRIVER_ARCHIVED: 'پرونده به آرشیو رفت', DRIVER_RESTORED: 'پرونده از آرشیو خارج شد',
   STORE_SETTLEMENT_RECORDED: 'تسویه فروشگاه ثبت شد', STORE_SETTLEMENT_UPDATED: 'اطلاعات تسویه به‌روزرسانی شد',
   WORKFLOW_SUBMIT_NEED: 'اعلام تمایل ثبت شد', WORKFLOW_VERIFY_APP: 'احراز هویت تأیید شد',

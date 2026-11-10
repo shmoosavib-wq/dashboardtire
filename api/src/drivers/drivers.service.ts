@@ -107,12 +107,16 @@ export class DriversService {
 
   async saveDraft(id: string, input: SaveDraftDto, actor: AuthenticatedUser) {
     const driver = await this.getActiveDriver(id);
-    if (driver.currentStage !== input.stage) throw new ConflictException('پیش‌نویس فقط در مرحلهٔ فعلی پرونده ذخیره می‌شود.');
+    const isHistoricalEdit = stages.indexOf(input.stage) < stages.indexOf(driver.currentStage);
+    if (driver.currentStage === 'COMPLETED' || (driver.currentStage !== input.stage && !isHistoricalEdit)) {
+      throw new ConflictException('فقط اطلاعات مرحلهٔ فعلی یا مراحل ثبت‌شدهٔ قبلی قابل ویرایش است.');
+    }
     this.assertStageAccess(input.stage, actor);
     const patch = this.sanitizePayload(input.stage, input.payload);
     try {
       return await this.prisma.$transaction(async (tx) => {
         const current = await tx.stageDraft.findUnique({ where: { driverId_stage: { driverId: id, stage: input.stage } } });
+        if (isHistoricalEdit && !current) throw new ConflictException('برای این مرحله اطلاعات ثبت‌شده‌ای پیدا نشد.');
         const previous = (current?.payload || {}) as JsonObject;
         const merged = { ...previous, ...patch };
         const changedKeys = Object.keys(patch).filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(patch[key]));
@@ -130,7 +134,12 @@ export class DriversService {
         }
         const draft = await tx.stageDraft.findUniqueOrThrow({ where: { driverId_stage: { driverId: id, stage: input.stage } } });
         await tx.auditEvent.create({
-          data: { driverId: id, actorId: actor.id, eventType: 'STAGE_DRAFT_SAVED', details: { stage: input.stage, changedKeys, version: draft.version } },
+          data: {
+            driverId: id,
+            actorId: actor.id,
+            eventType: isHistoricalEdit ? 'STAGE_DRAFT_CORRECTED' : 'STAGE_DRAFT_SAVED',
+            details: { stage: input.stage, changedKeys, version: draft.version, ...(isHistoricalEdit ? { currentStage: driver.currentStage } : {}) },
+          },
         });
         return draft;
       }, { isolationLevel: 'Serializable' });

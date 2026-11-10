@@ -5,6 +5,7 @@ import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { Response } from 'express';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
@@ -45,11 +46,35 @@ function encodedName(name: string): string {
 @Injectable()
 export class DocumentsService {
   private readonly baseDir = resolve(process.env.FILE_STORAGE_DIR || 'private-files');
+  private readonly liaraBucket = process.env.LIARA_BUCKET_NAME;
+  private readonly liaraClient = this.createLiaraClient();
+  // Kept only to read objects uploaded before the migration to Liara.
   private readonly storageUrl = process.env.SUPABASE_URL?.replace(/\/$/, '');
   private readonly storageBucket = process.env.SUPABASE_STORAGE_BUCKET;
   private readonly storageSecret = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  private createLiaraClient(): S3Client | undefined {
+    const endpoint = process.env.LIARA_ENDPOINT;
+    const accessKey = process.env.LIARA_ACCESS_KEY;
+    const secretKey = process.env.LIARA_SECRET_KEY;
+    if (!endpoint || !accessKey || !secretKey || !process.env.LIARA_BUCKET_NAME) return undefined;
+    let parsed: URL;
+    try {
+      parsed = new URL(endpoint);
+    } catch {
+      throw new Error('LIARA_ENDPOINT must be a valid HTTPS URL');
+    }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new Error('LIARA_ENDPOINT must be an HTTPS URL without credentials, query, or fragment');
+    }
+    return new S3Client({
+      region: 'default',
+      endpoint: parsed.toString().replace(/\/$/, ''),
+      credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
+    });
+  }
 
   async upload(driverId: string, input: UploadDocumentDto, file: Express.Multer.File, actor: AuthenticatedUser) {
     const driver = await this.prisma.driver.findUnique({ where: { id: driverId }, select: { id: true, archivedAt: true, currentStage: true } });
@@ -64,17 +89,22 @@ export class DocumentsService {
     if (file.size > max) throw new UnprocessableEntityException('حجم فایل از حد مجاز بیشتر است.');
     if (!validateSignature(mime, file.buffer)) throw new UnprocessableEntityException('محتوای فایل با نوع اعلام‌شده سازگار نیست.');
     if (input.category === DocumentCategory.CUSTOM && !input.customTitle?.trim()) throw new BadRequestException('برای مدرک متفرقه عنوان وارد کنید.');
-    const remoteStorage = Boolean(this.storageUrl && this.storageBucket && this.storageSecret);
-    if (process.env.NODE_ENV === 'production' && !remoteStorage) {
+    const liaraStorage = Boolean(this.liaraClient && this.liaraBucket);
+    if (process.env.NODE_ENV === 'production' && !liaraStorage) {
       throw new UnprocessableEntityException('File storage is not configured for this deployment.');
     }
-    const storageKey = remoteStorage ? `${driverId}/${randomUUID()}` : randomUUID();
+    const storageKey = liaraStorage ? `liara/${driverId}/${randomUUID()}` : randomUUID();
     const folder = resolve(this.baseDir, driverId);
     const target = resolve(folder, storageKey);
     const rel = relative(folder, target);
     if (rel.startsWith('..' + sep) || rel === '..') throw new BadRequestException('مسیر فایل معتبر نیست.');
     const originalName = safeOriginalName(file.originalname);
-    if (remoteStorage) await this.storageRequest(storageKey, { method: 'POST', headers: { 'Content-Type': mime, 'x-upsert': 'false' }, body: new Uint8Array(file.buffer) });
+    if (liaraStorage) {
+      await this.liaraClient!.send(new PutObjectCommand({
+        Bucket: this.liaraBucket!, Key: storageKey, Body: file.buffer,
+        ContentType: mime, ContentLength: file.size,
+      }));
+    }
     else {
       await mkdir(folder, { recursive: true });
       await writeFile(target, file.buffer, { flag: 'wx', mode: 0o600 });
@@ -105,7 +135,7 @@ export class DocumentsService {
         return document;
       });
     } catch (error) {
-      if (remoteStorage) await this.storageRequest(storageKey, { method: 'DELETE' }).catch(() => undefined);
+      if (liaraStorage) await this.liaraClient!.send(new DeleteObjectCommand({ Bucket: this.liaraBucket!, Key: storageKey })).catch(() => undefined);
       else await unlink(target).catch(() => undefined);
       throw error;
     }
@@ -114,12 +144,20 @@ export class DocumentsService {
   async download(driverId: string, documentId: string, actor: AuthenticatedUser, response: Response) {
     const doc = await this.prisma.driverDocument.findFirst({ where: { id: documentId, driverId, deletedAt: null } });
     if (!doc) throw new NotFoundException('فایل پیدا نشد.');
-    if (this.storageUrl && this.storageBucket && this.storageSecret) {
+    const isLiaraObject = doc.storageKey.startsWith('liara/');
+    const isLegacySupabaseObject = doc.storageKey.includes('/') && !isLiaraObject;
+    if (isLiaraObject || (isLegacySupabaseObject && this.storageUrl && this.storageBucket && this.storageSecret)) {
       await this.prisma.auditEvent.create({ data: { driverId, actorId: actor.id, eventType: 'DOCUMENT_DOWNLOADED', details: { documentId: doc.id, category: doc.category } } });
       response.setHeader('Content-Type', doc.mimeType);
       response.setHeader('Content-Length', String(doc.sizeBytes));
       response.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodedName(doc.originalName));
       response.setHeader('X-Content-Type-Options', 'nosniff');
+      if (isLiaraObject) {
+        if (!this.liaraClient || !this.liaraBucket) throw new UnprocessableEntityException('Liara file storage is not configured.');
+        const stored = await this.liaraClient.send(new GetObjectCommand({ Bucket: this.liaraBucket, Key: doc.storageKey }));
+        if (!stored.Body) throw new NotFoundException('Stored file not found.');
+        return new StreamableFile(Readable.fromWeb(stored.Body.transformToWebStream() as unknown as import('node:stream/web').ReadableStream));
+      }
       const stored = await this.storageRequest(doc.storageKey);
       if (!stored.body) throw new NotFoundException('Stored file not found.');
       return new StreamableFile(Readable.fromWeb(stored.body as import('node:stream/web').ReadableStream));

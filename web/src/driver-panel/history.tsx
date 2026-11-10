@@ -1,5 +1,5 @@
 import { displayDate, displayDateTime, faNumber } from '../api';
-import { type AuditEvent } from '../model';
+import { stageList, type AuditEvent } from '../model';
 import { categoryNames, actionNames } from './labels';
 
 function HistoryTab({ events }: { events: AuditEvent[] }) {
@@ -10,7 +10,10 @@ function HistoryTab({ events }: { events: AuditEvent[] }) {
 
 function formatDetails(details: Record<string, unknown>) {
   if (details.note && typeof details.note === 'string') return details.note;
-  if (Array.isArray(details.changedKeys)) return 'فیلدهای تغییرکرده: ' + (details.changedKeys as string[]).join('، ');
+  if (Array.isArray(details.changedKeys)) {
+    const stageName = stageList.find((stage) => stage.id === details.stage)?.title;
+    return (stageName ? `مرحلهٔ ${stageName} · ` : '') + 'فیلدهای تغییرکرده: ' + (details.changedKeys as string[]).join('، ');
+  }
   if (details.category && typeof details.category === 'string') return categoryNames[details.category] || details.category;
   if (details.settledAt && typeof details.settledAt === 'string') return 'تاریخ ' + displayDate(details.settledAt);
   return '';

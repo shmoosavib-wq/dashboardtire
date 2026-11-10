@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { api, faNumber, jsonBody, displayDate } from './api';
 import { roleNames, type Role, type User } from './model';
 import LoadingIndicator from './LoadingIndicator';
+import TablePagination from './TablePagination';
 
 const selectableRoles: Role[] = ['SUPER_ADMIN', 'SALES_OPERATIONS', 'LEGAL_FINANCE', 'CREDIT_APPROVER'];
 
@@ -9,6 +10,8 @@ export default function UsersPage({ notify }: { notify: (message: string) => voi
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [createOpen, setCreateOpen] = useState(false);
   const [resetUser, setResetUser] = useState<User | null>(null);
 
@@ -19,6 +22,10 @@ export default function UsersPage({ notify }: { notify: (message: string) => voi
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
+
+  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageUsers = users.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   async function toggleActive(user: User) {
     try {
@@ -32,11 +39,12 @@ export default function UsersPage({ notify }: { notify: (message: string) => voi
     <div className="page-heading"><div><div className="eyebrow">تنظیمات دسترسی</div><h1>کاربران و نقش‌ها</h1><p>حساب‌ها شخصی هستند و هر اقدام در پرونده به نام کاربر ثبت می‌شود.</p></div><button className="btn primary" onClick={() => setCreateOpen(true)}>＋ ساخت کاربر</button></div>
     <div className="summary-strip"><div><span className="summary-icon">♧</span><div><small>کل کاربران</small><b>{faNumber(users.length)}</b></div></div><div><span className="summary-icon green">✓</span><div><small>کاربران فعال</small><b>{faNumber(users.filter((item) => item.isActive).length)}</b></div></div><div><span className="summary-icon blue">⌘</span><div><small>نقش‌های سامانه</small><b>۴ نقش</b></div></div></div>
     {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
-    <div className="table-wrap"><table className="data-table"><thead><tr><th>کاربر</th><th>نام کاربری</th><th>نقش‌ها</th><th>وضعیت</th><th>تاریخ ایجاد</th><th /></tr></thead><tbody>
-      {loading ? <tr><td colSpan={6}><div className="empty-state"><LoadingIndicator label="در حال دریافت کاربران…" compact /></div></td></tr>
-        : users.map((user) => <tr key={user.id}><td><div className="driver-cell"><span className="driver-avatar">{user.name.slice(0, 1)}</span><strong>{user.name}</strong></div></td><td>{user.username}</td><td><div className="role-tags">{user.roles.map((role) => <span key={role}>{roleNames[role]}</span>)}</div></td><td><span className={'status-pill ' + (user.isActive ? 'success' : 'muted')}>{user.isActive ? 'فعال' : 'غیرفعال'}</span></td><td className="muted-cell">{displayDate(user.createdAt)}</td><td><div className="row-actions"><button className="btn small" onClick={() => setResetUser(user)}>تغییر رمز</button><button className={'btn small ' + (user.isActive ? 'danger-ghost' : 'subtle')} onClick={() => void toggleActive(user)}>{user.isActive ? 'غیرفعال‌کردن' : 'فعال‌کردن'}</button></div></td></tr>)}
-      {!loading && !users.length && <tr><td colSpan={6}><div className="empty-state">هنوز کاربری ساخته نشده است.</div></td></tr>}
+    <div className="table-wrap"><table className="data-table"><thead><tr><th>#</th><th>کاربر</th><th>نام کاربری</th><th>نقش‌ها</th><th>وضعیت</th><th>تاریخ ایجاد</th><th /></tr></thead><tbody>
+      {loading ? <tr><td colSpan={7}><div className="empty-state"><LoadingIndicator label="در حال دریافت کاربران…" compact /></div></td></tr>
+        : pageUsers.map((user, index) => <tr key={user.id}><td className="row-number">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td><div className="driver-cell"><span className="driver-avatar">{user.name.slice(0, 1)}</span><strong>{user.name}</strong></div></td><td>{user.username}</td><td><div className="role-tags">{user.roles.map((role) => <span key={role}>{roleNames[role]}</span>)}</div></td><td><span className={'status-pill ' + (user.isActive ? 'success' : 'muted')}>{user.isActive ? 'فعال' : 'غیرفعال'}</span></td><td className="muted-cell">{displayDate(user.createdAt)}</td><td><div className="row-actions"><button className="btn small" onClick={() => setResetUser(user)}>تغییر رمز</button><button className={'btn small ' + (user.isActive ? 'danger-ghost' : 'subtle')} onClick={() => void toggleActive(user)}>{user.isActive ? 'غیرفعال‌کردن' : 'فعال‌کردن'}</button></div></td></tr>)}
+      {!loading && !users.length && <tr><td colSpan={7}><div className="empty-state">هنوز کاربری ساخته نشده است.</div></td></tr>}
     </tbody></table></div>
+    {!loading && users.length > 0 && <TablePagination page={currentPage} pageSize={pageSize} total={users.length} itemLabel="کاربر" onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} />}
     {createOpen && <UserModal title="ساخت کاربر" onClose={() => setCreateOpen(false)} onSubmit={async (value) => { await api('/users', { method: 'POST', body: jsonBody(value) }); setCreateOpen(false); await load(); notify('کاربر ساخته شد.'); }} />}
     {resetUser && <PasswordModal user={resetUser} onClose={() => setResetUser(null)} onSubmit={async (password) => { await api('/users/' + resetUser.id + '/reset-password', { method: 'POST', body: jsonBody({ password }) }); setResetUser(null); notify('رمز کاربر تغییر کرد و نشست‌های قبلی بسته شدند.'); }} />}
   </div>;

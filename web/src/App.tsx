@@ -12,6 +12,7 @@ type Section = 'flow' | 'drivers' | 'users' | 'archive' | 'audit';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('sababar-theme') === 'dark' ? 'dark' : 'light');
   const [initialized, setInitialized] = useState<boolean | null>(null);
   const [section, setSection] = useState<Section>('flow');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -35,6 +36,10 @@ export default function App() {
   }
 
   useEffect(() => { void loadSession(); }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('sababar-theme', theme);
+  }, [theme]);
 
   function flash(message: string) {
     setNotice(message);
@@ -69,7 +74,7 @@ export default function App() {
       <main className="workspace">
         <header className="topbar">
           <div className="breadcrumbs"><span>صبابار</span><i>/</i><strong>{title}</strong></div>
-          <div className="user-menu"><span className="user-avatar">{user.name.slice(0, 1)}</span><div><b>{user.name}</b><small>{user.roles.map((role) => roleNames[role]).join('، ')}</small></div><button className="text-button" onClick={() => void logout()}>خروج</button></div>
+          <div className="user-menu"><button className="theme-toggle" type="button" aria-pressed={theme === 'dark'} aria-label={theme === 'dark' ? 'فعال‌کردن حالت روشن' : 'فعال‌کردن حالت تاریک'} title={theme === 'dark' ? 'حالت روشن' : 'حالت تاریک'} onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}><svg viewBox="0 0 24 24" aria-hidden="true">{theme === 'dark' ? <path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" /> : <path d="M20.2 15.3A8.5 8.5 0 0 1 8.7 3.8 8.5 8.5 0 1 0 20.2 15.3Z" />}</svg><span>{theme === 'dark' ? 'روشن' : 'تیره'}</span></button><span className="user-avatar">{user.name.slice(0, 1)}</span><div><b>{user.name}</b><small>{user.roles.map((role) => roleNames[role]).join('، ')}</small></div><button className="text-button" onClick={() => void logout()}>خروج</button></div>
         </header>
         <section className="page-content">
           {viewingDossier && selectedId

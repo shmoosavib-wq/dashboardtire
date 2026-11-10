@@ -3,8 +3,16 @@ import { api, displayDateTime, faDigits, faNumber, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
 import LoadingIndicator from './LoadingIndicator';
 import { statusLabel } from './driver-panel/labels';
-import { actionButtons, categoriesFor, Field, responsibleName, stageFields } from './driver-panel/stage-ui';
+import { actionButtons, categoriesFor, Field, responsibleName, stageFields, type FieldDef } from './driver-panel/stage-ui';
+import { StageHistory } from './driver-panel/StageHistory';
 import { ArchiveModal, DocumentsTab, HistoryTab, PurchaseSummary, SettlementModal, SettlementTab, UploadButton } from './driver-panel/records';
+
+const historicalProductFields: FieldDef[] = [
+  { name: 'title', label: 'نام کالا' },
+  { name: 'quantity', label: 'تعداد', kind: 'number' },
+  { name: 'saleUnitPrice', label: 'قیمت فروش هر واحد', kind: 'money' },
+  { name: 'supplyUnitCost', label: 'قیمت تأمین هر واحد', kind: 'money' },
+];
 
 export default function DriverPanel({ driverId, viewMode, user, notify, onClose, onChanged }: {
   driverId: string; viewMode: 'flow' | 'dossier'; user: User; notify: (message: string) => void; onClose: () => void; onChanged: (stage?: Stage) => void;
@@ -13,6 +21,10 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
   const [payload, setPayload] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [editingStage, setEditingStage] = useState<Stage | null>(null);
+  const [editPayload, setEditPayload] = useState<Record<string, unknown>>({});
+  const [editError, setEditError] = useState('');
+  const [editBusy, setEditBusy] = useState(false);
   const [settleOpen, setSettleOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const loadVersion = useRef(0);
@@ -38,13 +50,14 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
-      if (settleOpen) setSettleOpen(false);
+      if (editingStage) setEditingStage(null);
+      else if (settleOpen) setSettleOpen(false);
       else if (archiveOpen) setArchiveOpen(false);
       else onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, settleOpen, archiveOpen]);
+  }, [onClose, settleOpen, archiveOpen, editingStage]);
 
   async function saveDraft() {
     if (!driver) return;
@@ -54,6 +67,45 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
       onChanged(driver.currentStage); onClose(); notify('پیش‌نویس این مرحله ذخیره و پنجره بسته شد.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'ذخیره انجام نشد.'); }
     finally { setBusy(false); }
+  }
+
+  function editPreviousStage(stage: Stage) {
+    const saved = driver?.drafts?.find((item) => item.stage === stage);
+    if (!saved) return;
+    setEditingStage(stage);
+    setEditPayload({ ...saved.payload });
+    setEditError('');
+  }
+
+  function updateHistoricalProduct(index: number, name: string, value: unknown) {
+    setEditPayload((previous) => {
+      const products = Array.isArray(previous.products) ? [...previous.products] as Record<string, unknown>[] : [];
+      products[index] = { ...(products[index] || {}), [name]: value };
+      return { ...previous, products };
+    });
+  }
+
+  function addHistoricalProduct() {
+    setEditPayload((previous) => ({ ...previous, products: [...(Array.isArray(previous.products) ? previous.products : []), { title: '', quantity: '', saleUnitPrice: '', supplyUnitCost: '' }] }));
+  }
+
+  function removeHistoricalProduct(index: number) {
+    setEditPayload((previous) => ({ ...previous, products: (Array.isArray(previous.products) ? previous.products : []).filter((_, itemIndex) => itemIndex !== index) }));
+  }
+
+  async function savePreviousStage() {
+    if (!driver || !editingStage) return;
+    setEditBusy(true); setEditError('');
+    try {
+      await api('/drivers/' + driver.id + '/draft', { method: 'PATCH', body: jsonBody({ stage: editingStage, payload: editPayload }) });
+      const editedTitle = stageList.find((item) => item.id === editingStage)?.title || 'مرحله';
+      setEditingStage(null);
+      await load();
+      onChanged(driver.currentStage);
+      notify(`اطلاعات «${editedTitle}» اصلاح و در تاریخچه ثبت شد.`);
+    } catch (reason) {
+      setEditError(reason instanceof Error ? reason.message : 'اصلاح اطلاعات ذخیره نشد.');
+    } finally { setEditBusy(false); }
   }
 
   async function act(action: string) {
@@ -134,9 +186,29 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
       <section className="dossier-block dossier-documents"><DocumentsTab driver={driver} user={user} onUploaded={load} notify={notify} /></section>
       <div className="dossier-stepper"><div className="stage-line">{stageList.map((stage, index) => { const done = stageIndex > index || driver.currentStage === 'COMPLETED'; const current = stage.id === driver.currentStage; return <div className={'stage-node ' + (done ? 'done ' : '') + (current ? 'current' : '')} key={stage.id}><span>{done ? '✓' : faNumber(index + 1)}</span><small>{stage.compact}</small></div>; })}</div><span className="status-pill">{statusLabel[driver.stageStatus] || statusLabel[driver.currentStage]}</span></div>
       <section className="dossier-block"><DossierOverview driver={driver} /></section>
+      <section className="dossier-block"><StageHistory driver={driver} user={user} onEdit={editPreviousStage} /></section>
       <section className="dossier-block"><SettlementTab driver={driver} user={user} onOpen={() => setSettleOpen(true)} /></section>
       <section className="dossier-block"><HistoryTab events={driver.auditEvents || []} /></section>
     </div>
+    {editingStage && <div className="workflow-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setEditingStage(null)}>
+      <section className="workflow-dialog historical-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="historical-edit-title">
+        <header className="workflow-dialog-head"><div><span className="eyebrow">اصلاح اطلاعات ثبت‌شده</span><h2 id="historical-edit-title">{stageList.find((item) => item.id === editingStage)?.title}</h2></div><button className="icon-button" onClick={() => setEditingStage(null)} aria-label="بستن">×</button></header>
+        <div className="workflow-context"><span><b>راننده:</b> {driver.fullName}</span><span><b>مرحلهٔ جاری:</b> {stageList.find((item) => item.id === driver.currentStage)?.title || 'تکمیل‌شده'}</span></div>
+        <div className="workflow-dialog-body">
+          <div className="review-notice"><b>اصلاح مرحلهٔ قبلی</b><span>مرحلهٔ جاری تغییر نمی‌کند. نام کاربر، زمان و فیلدهای اصلاح‌شده در تاریخچهٔ پرونده ثبت می‌شود؛ اطلاعات مراحل بعد را پس از اصلاح بازبینی کنید.</span></div>
+          {editError && <div className="alert error" role="alert">{editError}</div>}
+          <div className="stage-form-grid">{stageFields[editingStage].map((field) => <Field key={field.name} field={field} value={editPayload[field.name]} disabled={editBusy} onChange={(value) => { setEditError(''); setEditPayload((old) => ({ ...old, [field.name]: value })); }} />)}</div>
+          {editingStage === 'PROFORMA_PAYMENT_RESERVATION' && <section className="historical-products">
+            <div className="section-head"><div><h4>کالاهای ثبت‌شده</h4><p>عنوان، تعداد و قیمت هر قلم را اصلاح کنید.</p></div><button className="btn small subtle" type="button" disabled={editBusy} onClick={addHistoricalProduct}>＋ افزودن کالا</button></div>
+            {(Array.isArray(editPayload.products) ? editPayload.products as Record<string, unknown>[] : []).map((product, index) => <div className="historical-product-row" key={index}>
+              {historicalProductFields.map((field) => <Field key={field.name} field={field} value={product[field.name]} disabled={editBusy} onChange={(value) => updateHistoricalProduct(index, field.name, value)} />)}
+              <button className="btn small danger-ghost" type="button" disabled={editBusy} onClick={() => removeHistoricalProduct(index)}>حذف</button>
+            </div>)}
+          </section>}
+        </div>
+        <footer className="workflow-dialog-actions"><button className="btn" disabled={editBusy} onClick={() => setEditingStage(null)}>انصراف</button><button className="btn primary" disabled={editBusy} onClick={() => void savePreviousStage()}>{editBusy ? 'در حال ذخیره…' : 'ذخیرهٔ اصلاحات'}</button></footer>
+      </section>
+    </div>}
     {settleOpen && <SettlementModal driver={driver} onClose={() => setSettleOpen(false)} onSaved={async () => { setSettleOpen(false); await load(); notify('\u062a\u0633\u0648\u06cc\u0647 \u0641\u0631\u0648\u0634\u06af\u0627\u0647 \u062b\u0628\u062a \u0634\u062f.'); }} />}
     {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} onSubmit={archive} busy={busy} />}
   </div>;
