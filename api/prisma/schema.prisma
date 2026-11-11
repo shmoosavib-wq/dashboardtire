@@ -50,6 +50,8 @@ model User {
   drafts       StageDraft[]
   documents    DriverDocument[]
   archived     Driver[]    @relation("DriverArchiver")
+  paidInstallments DriverInstallment[] @relation("InstallmentPaidBy")
+  supplierSettlements SupplierSettlementRecord[] @relation("SupplierSettlementRegisteredBy")
 }
 
 model Session {
@@ -85,6 +87,7 @@ model Driver {
   auditEvents    AuditEvent[]
   products       DriverProduct[]
   storeSettlement StoreSettlement?
+  installments   DriverInstallment[]
 
   @@index([currentStage, archivedAt])
   @@index([fullName])
@@ -135,8 +138,28 @@ model DriverProduct {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   driver        Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  supplierSettlements SupplierSettlementRecord[]
 
   @@index([driverId])
+}
+
+model SupplierSettlementRecord {
+  id             String        @id @default(uuid()) @db.Uuid
+  productId      String        @db.Uuid
+  productTitleSnapshot String
+  quantitySnapshot Int
+  saleTotalSnapshot BigInt?
+  payableTotalSnapshot BigInt
+  storeName      String
+  amount         BigInt
+  settledAt      DateTime
+  registeredById String        @db.Uuid
+  createdAt      DateTime      @default(now())
+  product        DriverProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  registeredBy   User          @relation("SupplierSettlementRegisteredBy", fields: [registeredById], references: [id], onDelete: Restrict)
+
+  @@index([productId, settledAt])
+  @@index([settledAt])
 }
 
 model StoreSettlement {
@@ -149,6 +172,23 @@ model StoreSettlement {
   driver      Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@index([settledAt])
+}
+
+model DriverInstallment {
+  id          String    @id @default(uuid()) @db.Uuid
+  driverId    String    @db.Uuid
+  number      Int
+  amount      BigInt
+  dueAt       DateTime
+  paidAt      DateTime?
+  paidById    String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  driver      Driver    @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  paidBy      User?     @relation("InstallmentPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+
+  @@unique([driverId, number])
+  @@index([driverId, dueAt])
 }
 
 model AuditEvent {

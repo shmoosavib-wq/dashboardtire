@@ -1,4 +1,4 @@
-import { displayDate, displayDateTime, faNumber } from '../api';
+import { displayDate, displayDateTime, faNumber, formatMoney } from '../api';
 import { stageList, type AuditEvent } from '../model';
 import { categoryNames, actionNames } from './labels';
 
@@ -16,6 +16,8 @@ function formatDetails(details: Record<string, unknown>) {
   }
   if (details.category && typeof details.category === 'string') return categoryNames[details.category] || details.category;
   if (details.settledAt && typeof details.settledAt === 'string') return 'تاریخ ' + displayDate(details.settledAt);
+  if (details.number && details.amount) return 'قسط ' + faNumber(String(details.number)) + ' · ' + formatMoney(details.amount) + ' تومان' + (typeof details.paidAt === 'string' ? ' · ' + displayDate(details.paidAt) : '');
+  if (details.count && details.totalAmount) return faNumber(String(details.count)) + ' قسط · مجموع ' + formatMoney(details.totalAmount) + ' تومان';
   return '';
 }
 

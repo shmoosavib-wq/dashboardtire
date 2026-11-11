@@ -6,9 +6,10 @@ import DriverPanel from './DriverPanel';
 import DriversPage from './DriversPage';
 import LoadingIndicator from './LoadingIndicator';
 import UsersPage from './UsersPage';
+import SupplierSettlementsPage from './SupplierSettlementsPage';
 import { can, roleNames, type Stage, type User } from './model';
 
-type Section = 'flow' | 'drivers' | 'users' | 'archive' | 'audit';
+type Section = 'flow' | 'drivers' | 'users' | 'archive' | 'audit' | 'supplier-settlements';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -57,7 +58,7 @@ export default function App() {
 
   const isAdmin = can(user, 'SUPER_ADMIN');
   const viewingDossier = Boolean(selectedId && panelMode === 'dossier');
-  const title = viewingDossier ? 'پرونده راننده' : section === 'flow' ? 'گردش فروش' : section === 'drivers' ? 'پرونده رانندگان' : section === 'users' ? 'مدیریت کاربران' : section === 'audit' ? 'گزارش رویدادها' : 'آرشیو پرونده‌ها';
+  const title = viewingDossier ? 'پرونده راننده' : section === 'flow' ? 'گردش فروش' : section === 'drivers' ? 'پرونده رانندگان' : section === 'users' ? 'مدیریت کاربران' : section === 'audit' ? 'گزارش رویدادها' : section === 'supplier-settlements' ? 'تسویه با تأمین‌کنندگان' : 'آرشیو پرونده‌ها';
   return (
     <div className="app-frame">
       <aside className="sidebar">
@@ -67,6 +68,7 @@ export default function App() {
           <button className={section === 'flow' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('flow'); setSelectedId(null); setFlowStage(''); }}><span className="nav-icon">↗</span>گردش فروش</button>
           <button className={section === 'drivers' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('drivers'); setSelectedId(null); }}><span className="nav-icon">♙</span>رانندگان</button>
           <button className={section === 'archive' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('archive'); setSelectedId(null); }}><span className="nav-icon">▣</span>آرشیو</button>
+          {can(user, 'LEGAL_FINANCE') && <button className={section === 'supplier-settlements' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('supplier-settlements'); setSelectedId(null); }}><span className="nav-icon">↔</span>تسویه با تأمین‌کنندگان</button>}
           {isAdmin && <><div className="nav-caption second">مدیریت سامانه</div><button className={section === 'users' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('users'); setSelectedId(null); }}><span className="nav-icon">♧</span>کاربران و دسترسی‌ها</button><button className={section === 'audit' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('audit'); setSelectedId(null); }}><span className="nav-icon">◷</span>گزارش رویدادها</button></>}
         </nav>
         <div className="sidebar-footer"><span className="online-dot" />سامانهٔ داخلی صبابار</div>
@@ -82,6 +84,7 @@ export default function App() {
             : section === 'users' && isAdmin
               ? <UsersPage notify={flash} />
               : section === 'audit' && isAdmin ? <AuditPage />
+              : section === 'supplier-settlements' && can(user, 'LEGAL_FINANCE') ? <SupplierSettlementsPage notify={flash} />
               : <DriversPage refreshToken={driversRefresh} mode={section === 'archive' ? 'archive' : section === 'drivers' ? 'drivers' : 'flow'} user={user} notify={flash} selectedStage={flowStage} onStageChange={setFlowStage} onOpen={(id, view) => { setPanelMode(view || (section === 'flow' ? 'flow' : 'dossier')); setSelectedId(id); }} />}
         </section>
       </main>

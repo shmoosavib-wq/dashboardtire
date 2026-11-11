@@ -6,13 +6,32 @@ export class ApiError extends Error {
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData) && init.body !== undefined) headers.set('Content-Type', 'application/json');
-  const response = await fetch('/api' + path, { ...init, headers, credentials: 'same-origin' });
+  let response: Response;
+  try {
+    response = await fetch('/api' + path, { ...init, cache: init.cache ?? 'no-store', headers, credentials: 'same-origin' });
+  } catch {
+    throw new ApiError('\u0627\u0631\u062a\u0628\u0627\u0637 \u0628\u0627 \u0633\u0631\u0648\u0631 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062f. \u0627\u062a\u0635\u0627\u0644 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f \u0648 \u062f\u0648\u0628\u0627\u0631\u0647 \u062a\u0644\u0627\u0634 \u06a9\u0646\u06cc\u062f.', 0);
+  }
   if (!response.ok) {
-    let message = 'درخواست انجام نشد.';
+    let message = '';
     try {
       const body = await response.json();
-      message = Array.isArray(body.message) ? body.message.join(' ') : body.message || message;
+      message = Array.isArray(body.message) ? body.message.join(' ') : typeof body.message === 'string' ? body.message : '';
     } catch { /* Keep the safe generic message for non-JSON failures. */ }
+    if (!message || /[A-Za-z]{3}/.test(message)) {
+      const statusMessages: Record<number, string> = {
+        400: '\u0627\u0637\u0644\u0627\u0639\u0627\u062a \u0648\u0627\u0631\u062f\u0634\u062f\u0647 \u0645\u0639\u062a\u0628\u0631 \u0646\u06cc\u0633\u062a\u0646\u062f. \u0641\u06cc\u0644\u062f\u0647\u0627 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f.',
+        401: '\u0628\u0631\u0627\u06cc \u0627\u062f\u0627\u0645\u0647 \u0648\u0627\u0631\u062f \u0633\u0627\u0645\u0627\u0646\u0647 \u0634\u0648\u06cc\u062f.',
+        403: '\u0628\u0631\u0627\u06cc \u0627\u0646\u062c\u0627\u0645 \u0627\u06cc\u0646 \u06a9\u0627\u0631 \u062f\u0633\u062a\u0631\u0633\u06cc \u0646\u062f\u0627\u0631\u06cc\u062f.',
+        404: '\u0645\u0648\u0631\u062f \u0645\u0648\u0631\u062f\u0646\u0638\u0631 \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f.',
+        409: '\u0627\u06cc\u0646 \u0639\u0645\u0644\u06cc\u0627\u062a \u0628\u0627 \u0648\u0636\u0639\u06cc\u062a \u0641\u0639\u0644\u06cc \u0633\u0627\u0632\u06af\u0627\u0631 \u0646\u06cc\u0633\u062a.',
+        413: '\u062d\u062c\u0645 \u0641\u0627\u06cc\u0644 \u0628\u06cc\u0634 \u0627\u0632 \u062d\u062f \u0645\u062c\u0627\u0632 \u0627\u0633\u062a.',
+        429: '\u062a\u0639\u062f\u0627\u062f \u062f\u0631\u062e\u0648\u0627\u0633\u062a\u200c\u0647\u0627 \u0632\u06cc\u0627\u062f \u0627\u0633\u062a. \u0686\u0646\u062f \u0644\u062d\u0638\u0647 \u062f\u06cc\u06af\u0631 \u062f\u0648\u0628\u0627\u0631\u0647 \u062a\u0644\u0627\u0634 \u06a9\u0646\u06cc\u062f.',
+      };
+      message = statusMessages[response.status] || (response.status >= 500
+        ? '\u062e\u0637\u0627\u06cc \u062f\u0627\u062e\u0644\u06cc \u0633\u0631\u0648\u0631 \u0631\u062e \u062f\u0627\u062f. \u0644\u0637\u0641\u0627\u064b \u0628\u0639\u062f\u0627\u064b \u062f\u0648\u0628\u0627\u0631\u0647 \u062a\u0644\u0627\u0634 \u06a9\u0646\u06cc\u062f.'
+        : '\u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0627\u0646\u062c\u0627\u0645 \u0646\u0634\u062f.');
+    }
     throw new ApiError(message, response.status);
   }
   if (response.status === 204) return undefined as T;

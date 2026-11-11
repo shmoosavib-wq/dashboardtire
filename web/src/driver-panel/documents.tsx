@@ -7,9 +7,16 @@ function UploadButton({ category, driver, user, onUploaded, notify }: { category
   const [busy, setBusy] = useState(false);
   const [customTitle, setCustomTitle] = useState('');
   const label = categoryNames[category] || category;
+  const uploadedDocument = category === 'CUSTOM' ? undefined : driver.documents?.find((document) => document.category === category && (document.stage === driver.currentStage || !document.stage));
   const allowed = category === 'CREDIT_RESULT' ? can(user, 'SALES_OPERATIONS', 'CREDIT_APPROVER')
     : can(user, 'SALES_OPERATIONS') || (['PROFORMA', 'CONTRACT', 'CHEQUE', 'DELIVERY', 'SATISFACTION_VIDEO'].includes(category) && can(user, 'LEGAL_FINANCE'));
   return <div className="upload-wrap">
+    {uploadedDocument ? <div className="stage-document-ready">
+      <span className="stage-document-check" aria-hidden="true">✓</span>
+      <span className="stage-document-name"><b>{uploadedDocument.originalName}</b><small>{label} بارگذاری و در پرونده ذخیره شده</small></span>
+      <a className="btn small" href={'/api/drivers/' + driver.id + '/documents/' + uploadedDocument.id + '/download'}>دانلود</a>
+      <small className="stage-document-replace">برای بارگذاری نسخهٔ جایگزین، مدرک فعلی را از بخش مدارک پرونده حذف کنید.</small>
+    </div> : <>
     {category === 'CUSTOM' && <input className="upload-title" value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="عنوان دلخواه مدرک" aria-label="عنوان دلخواه مدرک" />}
     <label className={'upload-control ' + (!allowed ? 'disabled' : '')}>
     <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.mp4,application/pdf,image/jpeg,image/png,image/webp,video/mp4" disabled={!allowed || busy} onChange={async (event) => {
@@ -26,6 +33,7 @@ function UploadButton({ category, driver, user, onUploaded, notify }: { category
     }} />
     <span className="upload-symbol">{busy ? '…' : '＋'}</span><span>{busy ? 'در حال بارگذاری…' : 'افزودن ' + label}</span>
     </label>
+    </>}
   </div>;
 }
 

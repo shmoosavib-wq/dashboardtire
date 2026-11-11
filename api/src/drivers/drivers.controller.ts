@@ -3,7 +3,7 @@ import { WorkflowStage } from '@prisma/client';
 import { AuthGuard } from '../common/auth.guard';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth';
 import { RolesGuard } from '../common/roles.guard';
-import { ArchiveDriverDto, CreateDriverDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
+import { ArchiveDriverDto, CreateDriverDto, RecordInstallmentPaymentDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
 import { DriversService } from './drivers.service';
 import { stageLabels } from './workflow';
 
@@ -52,5 +52,20 @@ export class DriversController {
   @Post(':id/store-settlement')
   settleStore(@Param('id') id: string, @Body() body: StoreSettlementDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.drivers.settleStore(id, body, actor);
+  }
+
+  @Post(':id/installments/:installmentId/payment')
+  recordInstallmentPayment(
+    @Param('id') id: string,
+    @Param('installmentId') installmentId: string,
+    @Body() body: RecordInstallmentPaymentDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.drivers.recordInstallmentPayment(id, installmentId, body, actor);
+  }
+
+  @Post(':id/installments')
+  createInstallmentPlan(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.drivers.createInstallmentPlan(id, actor);
   }
 }

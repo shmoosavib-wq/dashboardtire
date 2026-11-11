@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsBoolean, IsEnum, IsInt, IsObject, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsObject, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
 import { DocumentCategory, WorkflowStage } from '@prisma/client';
 
 export class CreateDriverDto {
@@ -27,6 +27,10 @@ export class ArchiveDriverDto {
 export class StoreSettlementDto {
   @IsString() @Matches(/^\d{4}-\d{2}-\d{2}$/) settledAt!: string;
   @IsInt() @Min(1) @Max(1000000000000000) amount!: number;
+}
+
+export class RecordInstallmentPaymentDto {
+  @IsDateString() paidAt!: string;
 }
 
 export class UploadDocumentDto {

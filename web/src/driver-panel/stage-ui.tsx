@@ -41,7 +41,6 @@ const stageFields: Record<Stage, FieldDef[]> = {
     { name: 'contractPhysical', label: 'نسخه فیزیکی قرارداد تحویل شد', kind: 'check', wide: true },
     { name: 'chequePhysical', label: 'اصل فیزیکی چک تحویل شد', kind: 'check', wide: true },
     { name: 'goodsDelivered', label: 'کالا به راننده تحویل شد', kind: 'check', wide: true },
-    { name: 'satisfactionVideoReceived', label: 'ویدئوی رضایت راننده دریافت شد', kind: 'check', wide: true },
   ],
   COMPLETED: [],
 };

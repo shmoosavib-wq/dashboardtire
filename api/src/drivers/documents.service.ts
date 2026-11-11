@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, StreamableFile, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, StreamableFile, UnprocessableEntityException } from '@nestjs/common';
 import { DocumentCategory, WorkflowStage } from '@prisma/client';
 import { createReadStream } from 'node:fs';
 import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
@@ -85,7 +85,8 @@ export class DocumentsService {
     const driver = await this.prisma.driver.findUnique({ where: { id: driverId }, select: { id: true, archivedAt: true, currentStage: true } });
     if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
     if (driver.archivedAt) throw new BadRequestException('پرونده آرشیو شده است.');
-    this.assertUploadAccess(input.stage || driver.currentStage, actor);
+    const stage = input.stage || driver.currentStage;
+    this.assertUploadAccess(stage, actor);
     if (!file?.buffer?.length) throw new BadRequestException('فایل دریافت نشد.');
     const extension = extname(file.originalname).toLowerCase();
     const mime = EXTENSION_MIME[extension] || file.mimetype.toLowerCase();
@@ -94,6 +95,13 @@ export class DocumentsService {
     if (file.size > max) throw new UnprocessableEntityException('حجم فایل از حد مجاز بیشتر است.');
     if (!validateSignature(mime, file.buffer)) throw new UnprocessableEntityException('محتوای فایل با نوع اعلام‌شده سازگار نیست.');
     if (input.category === DocumentCategory.CUSTOM && !input.customTitle?.trim()) throw new BadRequestException('برای مدرک متفرقه عنوان وارد کنید.');
+    if (input.category !== DocumentCategory.CUSTOM) {
+      const existing = await this.prisma.driverDocument.findFirst({
+        where: { driverId, category: input.category, deletedAt: null, OR: [{ stage }, { stage: null }] },
+        select: { id: true },
+      });
+      if (existing) throw new ConflictException('این مدرک برای همین مرحله قبلاً بارگذاری شده است؛ برای جایگزینی، نسخهٔ فعلی را از پرونده حذف کنید.');
+    }
     const liaraStorage = Boolean(this.liaraClient && this.liaraBucket);
     if (process.env.NODE_ENV === 'production' && !liaraStorage) {
       throw new UnprocessableEntityException('File storage is not configured for this deployment.');
@@ -120,7 +128,7 @@ export class DocumentsService {
           data: {
             driverId,
             category: input.category,
-            stage: input.stage || driver.currentStage,
+            stage,
             customTitle: input.category === DocumentCategory.CUSTOM ? input.customTitle!.trim() : null,
             originalName,
             storageKey,

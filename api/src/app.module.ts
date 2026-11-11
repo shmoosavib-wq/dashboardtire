@@ -6,9 +6,10 @@ import { CsrfGuard } from './common/csrf.guard';
 import { DatabaseModule } from './database.module';
 import { DriversModule } from './drivers/drivers.module';
 import { UsersModule } from './users/users.module';
+import { SupplierSettlementsModule } from './supplier-settlements/supplier-settlements.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, DriversModule, UsersModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, DriversModule, UsersModule, SupplierSettlementsModule],
   providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
 })
 export class AppModule {}

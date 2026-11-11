@@ -2,10 +2,67 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { DocumentCategory, UserRole, WorkflowStage } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
-import type { ArchiveDriverDto, CreateDriverDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
+import type { ArchiveDriverDto, CreateDriverDto, RecordInstallmentPaymentDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
 import { dateOnly, nonEmptyText, nonNegativeInteger, positiveMoney, requireRole, stages } from './workflow';
 
 type JsonObject = Record<string, unknown>;
+const INSTALLMENT_COUNT = 3;
+
+const jalaliCalendar = new Intl.DateTimeFormat('en-u-ca-persian-nu-latn', {
+  year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC',
+});
+
+function jalaliYearMonth(date: Date) {
+  const parts = jalaliCalendar.formatToParts(date);
+  return {
+    year: Number(parts.find((part) => part.type === 'year')?.value),
+    month: Number(parts.find((part) => part.type === 'month')?.value),
+  };
+}
+
+function firstDayOfJalaliMonth(year: number, month: number): Date {
+  const target = year * 12 + month - 1;
+  const dayMs = 24 * 60 * 60 * 1000;
+  let low = Math.floor(Date.UTC(year + 621, 0, 1) / dayMs);
+  let high = Math.floor(Date.UTC(year + 623, 0, 1) / dayMs);
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const parts = jalaliYearMonth(new Date(middle * dayMs + 12 * 60 * 60 * 1000));
+    if (parts.year * 12 + parts.month - 1 < target) low = middle + 1;
+    else high = middle;
+  }
+  const result = new Date(low * dayMs + 12 * 60 * 60 * 1000);
+  const parts = jalaliYearMonth(result);
+  if (parts.year !== year || parts.month !== month) throw new BadRequestException('محاسبهٔ سررسید شمسی ناموفق بود.');
+  return result;
+}
+
+function nextJalaliMonthStart(date: Date, months: number): Date {
+  const current = jalaliYearMonth(date);
+  const target = current.year * 12 + current.month - 1 + months;
+  const year = Math.floor(target / 12);
+  const month = target % 12 + 1;
+  return firstDayOfJalaliMonth(year, month);
+}
+
+function buildInstallmentRows(driverId: string, paymentAmount: unknown, paymentDate: unknown, products: { quantity: number; saleUnitPrice: bigint | number | null }[]) {
+  const saleTotal = products.reduce((sum, product) => sum + BigInt(product.quantity) * BigInt(product.saleUnitPrice || 0), 0n);
+  if (!saleTotal) return [];
+  const initialPayment = BigInt(positiveMoney(paymentAmount, 'مبلغ پرداخت'));
+  if (initialPayment > saleTotal) throw new BadRequestException('مبلغ پرداخت اولیه نمی‌تواند از جمع قیمت فروش بیشتر باشد.');
+  const remaining = saleTotal - initialPayment;
+  if (!remaining) return [];
+  if (remaining < BigInt(INSTALLMENT_COUNT)) throw new BadRequestException('ماندهٔ پرداخت برای تقسیم به سه قسط کافی نیست.');
+  const firstPaymentDate = dateOnly(paymentDate, 'تاریخ پرداخت اولیه');
+  const baseAmount = remaining / BigInt(INSTALLMENT_COUNT);
+  const remainder = remaining % BigInt(INSTALLMENT_COUNT);
+  return Array.from({ length: INSTALLMENT_COUNT }, (_, index) => ({
+    driverId,
+    number: index + 1,
+    amount: baseAmount + (index === INSTALLMENT_COUNT - 1 ? remainder : 0n),
+    dueAt: nextJalaliMonthStart(firstPaymentDate, index + 1),
+  }));
+}
 
 const stageFields: Record<WorkflowStage, Set<string>> = {
   NEED_DECLARED: new Set(['intentNote']),
@@ -13,7 +70,7 @@ const stageFields: Record<WorkflowStage, Set<string>> = {
   CREDIT_REVIEW: new Set(['sababarTrips', 'transportPayments', 'lastWaybillDate', 'bankRank', 'suggestedLimit', 'approvedLimit', 'decisionNote']),
   PROFORMA_PAYMENT_RESERVATION: new Set(['products', 'invoiceNumber', 'invoiceDate', 'proformaSent', 'paymentAmount', 'paymentDate', 'paymentReference', 'paymentReceivedConfirmed', 'reservationLocation', 'reservationDate', 'reservationConfirmed']),
   CONTRACT_CHEQUE: new Set(['contractNumber', 'chequeNumber', 'sayadId', 'chequeAmount', 'chequeDueDate', 'contractChecked', 'chequeChecked']),
-  DELIVERY_FINAL_DOCS: new Set(['deliveryDate', 'deliveryLocation', 'recipient', 'contractPhysical', 'chequePhysical', 'goodsDelivered', 'satisfactionVideoReceived']),
+  DELIVERY_FINAL_DOCS: new Set(['deliveryDate', 'deliveryLocation', 'recipient', 'contractPhysical', 'chequePhysical', 'goodsDelivered']),
   COMPLETED: new Set(),
 };
 
@@ -91,6 +148,7 @@ export class DriversService {
         auditEvents: { orderBy: { createdAt: 'desc' }, take: 250, include: { actor: { select: { id: true, name: true } } } },
         products: true,
         storeSettlement: true,
+        installments: { orderBy: { number: 'asc' }, include: { paidBy: { select: { id: true, name: true } } } },
       },
     });
     if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
@@ -102,13 +160,14 @@ export class DriversService {
         supplyUnitCost: product.supplyUnitCost === null ? null : String(product.supplyUnitCost),
       })),
       storeSettlement: driver.storeSettlement ? { ...driver.storeSettlement, amount: String(driver.storeSettlement.amount) } : null,
+      installments: driver.installments.map((installment) => ({ ...installment, amount: String(installment.amount) })),
     };
   }
 
   async saveDraft(id: string, input: SaveDraftDto, actor: AuthenticatedUser) {
     const driver = await this.getActiveDriver(id);
-    const isHistoricalEdit = stages.indexOf(input.stage) < stages.indexOf(driver.currentStage);
-    if (driver.currentStage === 'COMPLETED' || (driver.currentStage !== input.stage && !isHistoricalEdit)) {
+    const isHistoricalEdit = driver.currentStage === 'COMPLETED' || stages.indexOf(input.stage) < stages.indexOf(driver.currentStage);
+    if (driver.currentStage !== input.stage && !isHistoricalEdit) {
       throw new ConflictException('فقط اطلاعات مرحلهٔ فعلی یا مراحل ثبت‌شدهٔ قبلی قابل ویرایش است.');
     }
     this.assertStageAccess(input.stage, actor);
@@ -205,7 +264,7 @@ export class DriversService {
       case 'SUBMIT_PROFORMA':
         requireRole(actor, UserRole.SALES_OPERATIONS);
         this.expectStage(stage, 'PROFORMA_PAYMENT_RESERVATION');
-        if (!await this.hasDocument(id, DocumentCategory.PROFORMA)) throw new UnprocessableEntityException('ابتدا پیش‌فاکتور را بارگذاری کنید.');
+        if (!await this.hasDocument(id, DocumentCategory.PROFORMA, stage)) throw new UnprocessableEntityException('ابتدا پیش‌فاکتور همین مرحله را بارگذاری کنید.');
         if (payload.products !== undefined) this.cleanProducts(payload.products);
         nonEmptyText(payload.invoiceDate, 'تاریخ پیش‌فاکتور');
         nextStatus = 'AWAITING_INITIAL_PAYMENT';
@@ -257,10 +316,9 @@ export class DriversService {
       case 'COMPLETE_DELIVERY':
         requireRole(actor, UserRole.SALES_OPERATIONS);
         this.expectStage(stage, 'DELIVERY_FINAL_DOCS');
-        for (const key of ['contractPhysical', 'chequePhysical', 'goodsDelivered', 'satisfactionVideoReceived']) {
+        for (const key of ['contractPhysical', 'chequePhysical', 'goodsDelivered']) {
           if (payload[key] !== true) throw new UnprocessableEntityException('همهٔ تأییدهای تحویل و دریافت مستندات باید ثبت شوند.');
         }
-        if (!await this.hasDocument(id, DocumentCategory.SATISFACTION_VIDEO)) throw new UnprocessableEntityException('ویدئوی رضایت راننده باید بارگذاری شود.');
         nonEmptyText(payload.deliveryDate, 'تاریخ تحویل');
         nextStage = 'COMPLETED';
         nextStatus = 'COMPLETED';
@@ -300,8 +358,62 @@ export class DriversService {
           })),
         });
       }
+      if (action === 'CONFIRM_INITIAL_PAYMENT') {
+        const products = Array.isArray(payload.products) && payload.products.length > 0
+          ? this.cleanProducts(payload.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }))
+          : await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
+        const installments = buildInstallmentRows(id, payload.paymentAmount, payload.paymentDate, products);
+        if (installments.length) {
+          const created = await tx.driverInstallment.createMany({ data: installments, skipDuplicates: true });
+          if (created.count > 0) {
+            const totalAmount = installments.reduce((sum, item) => sum + item.amount, 0n);
+            await tx.auditEvent.create({
+              data: {
+                driverId: id,
+                actorId: actor.id,
+                eventType: 'INSTALLMENT_PLAN_CREATED',
+                details: { count: created.count, totalAmount: String(totalAmount), initialPayment: String(payload.paymentAmount), dueDates: installments.map((item) => item.dueAt.toISOString().slice(0, 10)) },
+              },
+            });
+          }
+        }
+      }
       await tx.auditEvent.create({ data: { driverId: id, actorId: actor.id, eventType: `WORKFLOW_${action}`, details } });
       return tx.driver.findUnique({ where: { id } });
+    });
+  }
+
+  async createInstallmentPlan(id: string, actor: AuthenticatedUser) {
+    requireRole(actor, UserRole.LEGAL_FINANCE);
+    await this.getActiveDriver(id);
+    return this.prisma.$transaction(async (tx) => {
+      const existingCount = await tx.driverInstallment.count({ where: { driverId: id } });
+      if (existingCount >= INSTALLMENT_COUNT) return { created: false, count: existingCount };
+      const draft = await tx.stageDraft.findUnique({ where: { driverId_stage: { driverId: id, stage: 'PROFORMA_PAYMENT_RESERVATION' } } });
+      const payload = (draft?.payload || {}) as JsonObject;
+      if (payload.paymentReceivedConfirmed !== true) throw new ConflictException('پرداخت اولیه باید توسط مالی تأیید شود.');
+      const confirmation = await tx.auditEvent.findFirst({ where: { driverId: id, eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' }, select: { id: true } });
+      if (!confirmation) throw new ConflictException('تأیید پرداخت اولیه در تاریخچه پیدا نشد.');
+      const products = Array.isArray(payload.products) && payload.products.length > 0
+        ? this.cleanProducts(payload.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }))
+        : await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
+      const installments = buildInstallmentRows(id, payload.paymentAmount, payload.paymentDate, products);
+      if (!installments.length) throw new BadRequestException('اطلاعات کالای قیمت‌دار و پرداخت اولیه برای ساخت برنامهٔ قسط کافی نیست.');
+      const created = await tx.driverInstallment.createMany({ data: installments, skipDuplicates: true });
+      const initialPayment = String(payload.paymentAmount);
+      const totalAmount = installments.reduce((sum, item) => sum + item.amount, 0n);
+      if (created.count > 0) {
+        await tx.auditEvent.create({
+          data: {
+            driverId: id,
+            actorId: actor.id,
+            eventType: 'INSTALLMENT_PLAN_CREATED',
+            details: { count: created.count, totalAmount: String(totalAmount), initialPayment, dueDates: installments.map((item) => item.dueAt.toISOString().slice(0, 10)) },
+          },
+        });
+      }
+      const count = await tx.driverInstallment.count({ where: { driverId: id } });
+      return { created: created.count > 0, count, totalAmount: String(totalAmount) };
     });
   }
 
@@ -346,6 +458,35 @@ export class DriversService {
     return { ...settlement, amount: String(settlement.amount) };
   }
 
+  async recordInstallmentPayment(id: string, installmentId: string, input: RecordInstallmentPaymentDto, actor: AuthenticatedUser) {
+    requireRole(actor, UserRole.LEGAL_FINANCE);
+    await this.getActiveDriver(id);
+    const paidAt = dateOnly(input.paidAt, 'تاریخ پرداخت');
+    const todayInTehran = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    if (input.paidAt > todayInTehran) throw new BadRequestException('تاریخ پرداخت نمی‌تواند در آینده باشد.');
+    const existing = await this.prisma.driverInstallment.findFirst({ where: { id: installmentId, driverId: id } });
+    if (!existing) throw new NotFoundException('قسط موردنظر پیدا نشد.');
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.driverInstallment.updateMany({
+        where: { id: installmentId, driverId: id, paidAt: existing.paidAt },
+        data: { paidAt, paidById: actor.id },
+      });
+      if (!changed.count) throw new ConflictException('قسط هم‌زمان تغییر کرده؛ اطلاعات تازه را بارگذاری کنید.');
+      const updated = await tx.driverInstallment.findUniqueOrThrow({ where: { id: installmentId } });
+      await tx.auditEvent.create({
+        data: {
+          driverId: id,
+          actorId: actor.id,
+          eventType: existing.paidAt ? 'INSTALLMENT_PAYMENT_UPDATED' : 'INSTALLMENT_PAYMENT_RECORDED',
+          details: { installmentId, number: existing.number, amount: String(existing.amount), paidAt: paidAt.toISOString() },
+        },
+      });
+      return { ...updated, amount: String(updated.amount) };
+    });
+  }
+
   private async getActiveDriver(id: string) {
     const driver = await this.prisma.driver.findUnique({ where: { id } });
     if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
@@ -353,8 +494,10 @@ export class DriversService {
     return driver;
   }
 
-  private async hasDocument(driverId: string, category: DocumentCategory) {
-    return (await this.prisma.driverDocument.count({ where: { driverId, category, deletedAt: null } })) > 0;
+  private async hasDocument(driverId: string, category: DocumentCategory, stage?: WorkflowStage) {
+    return (await this.prisma.driverDocument.count({
+      where: { driverId, category, deletedAt: null, ...(stage ? { OR: [{ stage }, { stage: null }] } : {}) },
+    })) > 0;
   }
 
   private assertStageAccess(stage: WorkflowStage, actor: AuthenticatedUser) {

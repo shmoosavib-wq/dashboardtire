@@ -63,6 +63,90 @@ test('credit review accepts zero trips and transport payments and submits them f
   assert.equal(submittedPayload.transportPayments, '0');
 });
 
+test('finance confirmation creates three monthly installments from the remaining sale amount', async () => {
+  let driver = { id: 'driver-1', currentStage: 'PROFORMA_PAYMENT_RESERVATION', stageStatus: 'AWAITING_PAYMENT_CONFIRMATION', archivedAt: null };
+  let createdInstallments;
+  const auditEvents = [];
+  const draft = { payload: { paymentAmount: '2000', paymentDate: '2026-09-23', paymentReceivedConfirmed: false } };
+  let savedDraftPayload;
+  const tx = {
+    driver: {
+      updateMany: async ({ data }) => { driver = { ...driver, ...data }; return { count: 1 }; },
+      findUnique: async () => driver,
+    },
+    stageDraft: { upsert: async ({ update }) => { savedDraftPayload = update.payload; } },
+    driverProduct: { findMany: async () => [{ quantity: 1, saleUnitPrice: 5001n }] },
+    driverInstallment: { createMany: async ({ data }) => { createdInstallments = data; return { count: data.length }; } },
+    auditEvent: { create: async ({ data }) => auditEvents.push(data) },
+  };
+  const prisma = {
+    driver: { findUnique: async () => driver },
+    stageDraft: { findUnique: async () => draft },
+    $transaction: async (callback) => callback(tx),
+  };
+  await new DriversService(prisma).action('driver-1', {
+    action: 'CONFIRM_INITIAL_PAYMENT', payload: { paymentReceivedConfirmed: true },
+  }, actor('finance', 'LEGAL_FINANCE'));
+
+  assert.equal(savedDraftPayload.paymentReceivedConfirmed, true);
+  assert.equal(driver.stageStatus, 'PAYMENT_CONFIRMED_AWAITING_RESERVATION');
+  assert.equal(createdInstallments.length, 3);
+  assert.deepEqual(createdInstallments.map(({ number, amount, dueAt }) => ({ number, amount, dueAt: dueAt.toISOString().slice(0, 10) })), [
+    { number: 1, amount: 1000n, dueAt: '2026-10-23' },
+    { number: 2, amount: 1000n, dueAt: '2026-11-22' },
+    { number: 3, amount: 1001n, dueAt: '2026-12-22' },
+  ]);
+  const jalaliDate = (date) => new Intl.DateTimeFormat('en-u-ca-persian-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'UTC' }).format(date);
+  assert.deepEqual(createdInstallments.map(({ dueAt }) => jalaliDate(dueAt)), ['08/01/1405 AP', '09/01/1405 AP', '10/01/1405 AP']);
+  assert.ok(auditEvents.some((event) => event.eventType === 'INSTALLMENT_PLAN_CREATED'));
+});
+
+test('installment plan repair fills missing rows and stays idempotent', async () => {
+  let existingCount = 1;
+  let createArgs;
+  const auditEvents = [];
+  const tx = {
+    driverInstallment: {
+      count: async () => existingCount,
+      createMany: async (args) => { createArgs = args; existingCount = 3; return { count: 2 }; },
+    },
+    stageDraft: { findUnique: async () => ({ payload: { paymentAmount: '2000', paymentDate: '2026-09-23', paymentReceivedConfirmed: true } }) },
+    auditEvent: {
+      findFirst: async () => ({ id: 'confirmation-event' }),
+      create: async ({ data }) => auditEvents.push(data),
+    },
+    driverProduct: { findMany: async () => [{ quantity: 1, saleUnitPrice: 5001n }] },
+  };
+  const service = new DriversService({
+    driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null }) },
+    $transaction: async (callback) => callback(tx),
+  });
+
+  const result = await service.createInstallmentPlan('driver-1', actor('finance', 'LEGAL_FINANCE'));
+  assert.deepEqual(result, { created: true, count: 3, totalAmount: '3001' });
+  assert.equal(createArgs.skipDuplicates, true);
+  assert.equal(createArgs.data.length, 3);
+  assert.equal(auditEvents.length, 1);
+
+  const secondResult = await service.createInstallmentPlan('driver-1', actor('finance', 'LEGAL_FINANCE'));
+  assert.deepEqual(secondResult, { created: false, count: 3 });
+  assert.equal(auditEvents.length, 1);
+});
+
+test('submitting the proforma requires a stored proforma for the current stage', async () => {
+  let documentQuery;
+  const service = new DriversService({
+    driver: { findUnique: async () => ({ id: 'driver-1', currentStage: 'PROFORMA_PAYMENT_RESERVATION', stageStatus: 'IN_PROGRESS', archivedAt: null }) },
+    stageDraft: { findUnique: async () => ({ payload: { invoiceDate: '2026-11-11' } }) },
+    driverDocument: { count: async ({ where }) => { documentQuery = where; return 0; } },
+  });
+  await assert.rejects(service.action('driver-1', {
+    action: 'SUBMIT_PROFORMA', payload: { invoiceDate: '2026-11-11' },
+  }, actor('sales', 'SALES_OPERATIONS')), UnprocessableEntityException);
+  assert.equal(documentQuery.category, 'PROFORMA');
+  assert.deepEqual(documentQuery.OR, [{ stage: 'PROFORMA_PAYMENT_RESERVATION' }, { stage: null }]);
+});
+
 test('role policy permits the assigned role and super admin, and denies unrelated roles', () => {
   requireRole(actor('sales', 'SALES_OPERATIONS'), 'SALES_OPERATIONS');
   requireRole(actor('admin', 'SUPER_ADMIN'), 'LEGAL_FINANCE');
@@ -127,7 +211,7 @@ test('previous-stage corrections preserve the current stage and write a correcti
   assert.equal(JSON.stringify(audit[0].data.details).includes('SF-1'), false);
 });
 
-test('previous-stage correction requires a saved stage draft and cannot edit completed dossiers', async () => {
+test('previous-stage correction requires a saved draft and remains available on completed dossiers', async () => {
   const tx = { stageDraft: { findUnique: async () => null }, auditEvent: { create: async () => undefined } };
   const active = new DriversService({
     driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null, currentStage: 'CREDIT_REVIEW' }) },
@@ -137,13 +221,26 @@ test('previous-stage correction requires a saved stage draft and cannot edit com
     stage: 'APP_VERIFICATION', payload: { ownerVerified: true },
   }, actor('sales', 'SALES_OPERATIONS')), ConflictException);
 
+  const completedDraft = { id: 'draft-completed', payload: { goodsDelivered: false }, version: 1 };
+  let completedUpdate;
+  let completedAudit;
   const completed = new DriversService({
     driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null, currentStage: 'COMPLETED' }) },
-    $transaction: async () => { throw new Error('transaction should not start'); },
+    $transaction: async (callback) => callback({
+      stageDraft: {
+        findUnique: async () => completedDraft,
+        updateMany: async (args) => { completedUpdate = args; return { count: 1 }; },
+        findUniqueOrThrow: async () => ({ ...completedDraft, ...completedUpdate.data, version: 2 }),
+      },
+      auditEvent: { create: async ({ data }) => { completedAudit = data; } },
+    }),
   });
-  await assert.rejects(completed.saveDraft('driver-1', {
+  const corrected = await completed.saveDraft('driver-1', {
     stage: 'DELIVERY_FINAL_DOCS', payload: { goodsDelivered: true },
-  }, actor('sales', 'SALES_OPERATIONS')), ConflictException);
+  }, actor('sales', 'SALES_OPERATIONS'));
+  assert.equal(corrected.payload.goodsDelivered, true);
+  assert.equal(completedAudit.eventType, 'STAGE_DRAFT_CORRECTED');
+  assert.equal(completedAudit.details.currentStage, 'COMPLETED');
 });
 
 test('driver draft rejects unknown fields before opening a transaction', async () => {
@@ -255,6 +352,32 @@ test('store settlement persists the amount/date and records whether it is new', 
   assert.equal(auditEvent.eventType, 'STORE_SETTLEMENT_RECORDED');
 });
 
+test('only finance can record an installment payment, stored and audited as a date without time', async () => {
+  let updateArgs;
+  let auditEvent;
+  const installment = { id: 'installment-1', driverId: 'driver-1', number: 1, amount: 1000n, paidAt: null };
+  const prisma = {
+    driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null }) },
+    driverInstallment: { findFirst: async () => installment },
+    $transaction: async (callback) => callback({
+      driverInstallment: {
+        updateMany: async (args) => { updateArgs = args; return { count: 1 }; },
+        findUniqueOrThrow: async () => ({ ...installment, paidAt: updateArgs.data.paidAt, paidById: updateArgs.data.paidById }),
+      },
+      auditEvent: { create: async ({ data }) => { auditEvent = data; } },
+    }),
+  };
+  const service = new DriversService(prisma);
+  const result = await service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2020-01-02' }, actor('finance', 'LEGAL_FINANCE'));
+  assert.equal(updateArgs.data.paidAt.toISOString(), '2020-01-02T12:00:00.000Z');
+  assert.equal(result.amount, '1000');
+  assert.equal(auditEvent.eventType, 'INSTALLMENT_PAYMENT_RECORDED');
+  assert.equal(auditEvent.details.paidAt, '2020-01-02T12:00:00.000Z');
+  await assert.rejects(service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2020-01-02' }, actor('sales', 'SALES_OPERATIONS')), ForbiddenException);
+  await assert.rejects(service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2999-01-02' }, actor('finance', 'LEGAL_FINANCE')), BadRequestException);
+  await assert.rejects(service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2020-01-02T03:04:00.000Z' }, actor('finance', 'LEGAL_FINANCE')), BadRequestException);
+});
+
 test('document upload rejects a forged PDF signature before writing to storage', async () => {
   let transactionOpened = false;
   const service = new DocumentsService({
@@ -272,10 +395,12 @@ test('document upload restores UTF-8 Persian multipart filenames before saving m
   const storageDir = await mkdtemp(join(tmpdir(), 'bnpl-upload-'));
   process.env.FILE_STORAGE_DIR = storageDir;
   let createArgs;
+  let existingDocument = null;
   const prisma = {
     driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null, currentStage: 'NEED_DECLARED' }) },
+    driverDocument: { findFirst: async ({ where }) => { assert.equal(where.OR[0].stage, 'PROFORMA_PAYMENT_RESERVATION'); return existingDocument; } },
     $transaction: async (callback) => callback({
-      driverDocument: { create: async (args) => { createArgs = args; return { id: 'doc-1', ...args.data }; } },
+      driverDocument: { create: async (args) => { createArgs = args; existingDocument = { id: 'doc-1' }; return { id: 'doc-1', ...args.data }; } },
       auditEvent: { create: async () => undefined },
     }),
   };
@@ -284,10 +409,12 @@ test('document upload restores UTF-8 Persian multipart filenames before saving m
     const originalName = Buffer.from(expectedName, 'utf8').toString('latin1');
     const service = new DocumentsService(prisma);
     const fileBuffer = Buffer.from('%PDF-1.7');
-    await service.upload('driver-1', { category: 'PROFORMA' }, {
+    const file = {
       originalname: originalName, mimetype: 'application/pdf', size: fileBuffer.length, buffer: fileBuffer,
-    }, actor('sales', 'SALES_OPERATIONS'));
+    };
+    await service.upload('driver-1', { category: 'PROFORMA', stage: 'PROFORMA_PAYMENT_RESERVATION' }, file, actor('sales', 'SALES_OPERATIONS'));
     assert.equal(createArgs.data.originalName, expectedName);
+    await assert.rejects(service.upload('driver-1', { category: 'PROFORMA', stage: 'PROFORMA_PAYMENT_RESERVATION' }, file, actor('sales', 'SALES_OPERATIONS')), ConflictException);
   } finally {
     if (previousStorageDir === undefined) delete process.env.FILE_STORAGE_DIR;
     else process.env.FILE_STORAGE_DIR = previousStorageDir;

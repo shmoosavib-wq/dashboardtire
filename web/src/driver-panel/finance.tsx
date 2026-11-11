@@ -16,7 +16,7 @@ function SettlementTab({ driver, user, onOpen }: { driver: Driver; user: User; o
 function PurchaseSummary({ driver }: { driver: Driver }) {
   const draft = (driver.drafts?.find((item) => item.stage === 'PROFORMA_PAYMENT_RESERVATION')?.payload || {}) as Record<string, unknown>;
   const draftLines = Array.isArray(draft.products) ? draft.products as Record<string, unknown>[] : [];
-  const lines = driver.products?.length ? driver.products.map((item) => ({ title: item.title, quantity: item.quantity, saleUnitPrice: item.saleUnitPrice, supplyUnitCost: item.supplyUnitCost })) : draftLines;
+  const lines = draftLines.length ? draftLines : driver.products || [];
   if (!lines.length && !draft.paymentAmount) return null;
   return <div className="finance-summary"><h4>خلاصه خرید راننده</h4>{lines.map((line, index) => {
     const quantity = BigInt(asciiDigits(String(line.quantity || '')).replace(/\D/g, '') || '0');

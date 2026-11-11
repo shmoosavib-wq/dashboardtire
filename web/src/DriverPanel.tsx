@@ -14,6 +14,16 @@ const historicalProductFields: FieldDef[] = [
   { name: 'supplyUnitCost', label: 'قیمت تأمین هر واحد', kind: 'money' },
 ];
 
+function hasStageDocument(driver: Driver, category: string) {
+  return driver.documents?.some((document) => document.category === category && (document.stage === driver.currentStage || !document.stage)) || false;
+}
+
+function actionMissingDocuments(driver: Driver, action: string) {
+  if (action === 'SUBMIT_PROFORMA') return !hasStageDocument(driver, 'PROFORMA');
+  if (action === 'SUBMIT_CONTRACT_CHEQUE') return !hasStageDocument(driver, 'CONTRACT') || !hasStageDocument(driver, 'CHEQUE');
+  return false;
+}
+
 export default function DriverPanel({ driverId, viewMode, user, notify, onClose, onChanged }: {
   driverId: string; viewMode: 'flow' | 'dossier'; user: User; notify: (message: string) => void; onClose: () => void; onChanged: (stage?: Stage) => void;
 }) {
@@ -29,15 +39,16 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
   const [archiveOpen, setArchiveOpen] = useState(false);
   const loadVersion = useRef(0);
 
-  async function load() {
+  async function load(options: { preserveCurrentPayload?: boolean } = {}) {
     const version = ++loadVersion.current;
+    const currentPayload = options.preserveCurrentPayload ? payload : undefined;
     setError('');
     try {
       const value = await api<Driver>('/drivers/' + driverId);
       if (version !== loadVersion.current) return;
       setDriver(value);
       const active = value.drafts?.find((item) => item.stage === value.currentStage);
-      setPayload(active?.payload || {});
+      setPayload(currentPayload ?? active?.payload ?? {});
     } catch (reason) {
       if (version === loadVersion.current) setError(reason instanceof Error ? reason.message : 'پرونده دریافت نشد.');
     }
@@ -184,6 +195,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
     {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
     <div className="dossier-sections">
       <section className="dossier-block dossier-documents"><DocumentsTab driver={driver} user={user} onUploaded={load} notify={notify} /></section>
+      {(driver.currentStage === 'DELIVERY_FINAL_DOCS' || driver.currentStage === 'COMPLETED') && !driver.documents?.some((document) => document.category === 'SATISFACTION_VIDEO') && <div className="alert missing-video-warning" role="status">{'\u0648\u06cc\u062f\u0626\u0648\u06cc \u0631\u0636\u0627\u06cc\u062a \u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0646\u0634\u062f\u0647'}</div>}
       <div className="dossier-stepper"><div className="stage-line">{stageList.map((stage, index) => { const done = stageIndex > index || driver.currentStage === 'COMPLETED'; const current = stage.id === driver.currentStage; return <div className={'stage-node ' + (done ? 'done ' : '') + (current ? 'current' : '')} key={stage.id}><span>{done ? '✓' : faNumber(index + 1)}</span><small>{stage.compact}</small></div>; })}</div><span className="status-pill">{statusLabel[driver.stageStatus] || statusLabel[driver.currentStage]}</span></div>
       <section className="dossier-block"><DossierOverview driver={driver} /></section>
       <section className="dossier-block"><StageHistory driver={driver} user={user} onEdit={editPreviousStage} /></section>
@@ -238,7 +250,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
               const readOnly = !canEdit || (readOnlyReview && !editablePaymentConfirmation) || (waitingForFinance && !editablePaymentConfirmation) || (creditReview && creditEntryField) || (contractReview && !['contractChecked', 'chequeChecked', 'chequeAmount', 'chequeNumber', 'chequeDueDate'].includes(field.name));
               return <Field key={field.name} field={field} value={payload[field.name]} disabled={readOnly} onChange={(value) => { setError(''); setPayload((old) => ({ ...old, [field.name]: value })); }} />;
             })}</div>
-            {!isArchived && fileCategories.length > 0 && <section className="stage-docs"><div className="section-head"><div><h4>{'\u0645\u062f\u0627\u0631\u06a9 \u0627\u06cc\u0646 \u0645\u0631\u062d\u0644\u0647'}</h4><p>{'\u0641\u0627\u06cc\u0644\u200c\u0647\u0627 \u0628\u0644\u0627\u0641\u0627\u0635\u0644\u0647 \u062b\u0628\u062a \u0645\u06cc\u200c\u0634\u0648\u0646\u062f \u0648 \u062f\u0631 \u067e\u0631\u0648\u0646\u062f\u0647 \u0628\u0627\u0642\u06cc \u0645\u06cc\u200c\u0645\u0627\u0646\u0646\u062f.'}</p></div></div><div className="upload-row">{fileCategories.map((category) => <UploadButton key={category} category={category} driver={driver} user={user} onUploaded={load} notify={notify} />)}</div></section>}
+            {!isArchived && fileCategories.length > 0 && <section className="stage-docs"><div className="section-head"><div><h4>{'\u0645\u062f\u0627\u0631\u06a9 \u0627\u06cc\u0646 \u0645\u0631\u062d\u0644\u0647'}</h4><p>{'\u0641\u0627\u06cc\u0644\u200c\u0647\u0627 \u0628\u0644\u0627\u0641\u0627\u0635\u0644\u0647 \u062b\u0628\u062a \u0645\u06cc\u200c\u0634\u0648\u0646\u062f \u0648 \u062f\u0631 \u067e\u0631\u0648\u0646\u062f\u0647 \u0628\u0627\u0642\u06cc \u0645\u06cc\u200c\u0645\u0627\u0646\u0646\u062f.'}</p></div></div><div className="upload-row">{fileCategories.map((category) => <UploadButton key={category} category={category} driver={driver} user={user} onUploaded={() => load({ preserveCurrentPayload: true })} notify={notify} />)}</div></section>}
             {driver.stageStatus === 'CREDIT_REJECTED' && <div className="rejected-note"><span>!</span><div><b>{'\u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0627\u0639\u062a\u0628\u0627\u0631 \u0631\u062f \u0634\u062f\u0647 \u0627\u0633\u062a.'}</b><small>{String(payload.decisionNote || 'یادداشتی ثبت نشده است.')}</small></div></div>}
           </>}
         </div>
@@ -249,7 +261,8 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
           {canEdit && !readOnlyReview && <button className="btn" disabled={busy} onClick={() => void saveDraft()}>{busy ? '\u0630\u062e\u06cc\u0631\u0647\u2026' : '\u0630\u062e\u06cc\u0631\u0647 \u0645\u0648\u0642\u062a'}</button>}
           <div className="workflow-primary-actions">{actionButtons(driver, user).map((item) => {
             const confirmationMissing = (item.action === 'CONFIRM_INITIAL_PAYMENT' && payload.paymentReceivedConfirmed !== true) || (item.action === 'RESERVE_GOODS' && payload.reservationConfirmed !== true);
-            return <button key={item.action} className={'btn ' + (item.kind || 'primary')} disabled={busy || confirmationMissing} onClick={() => void act(item.action)}>{item.label}</button>;
+            const documentMissing = actionMissingDocuments(driver, item.action);
+            return <button key={item.action} className={'btn ' + (item.kind || 'primary')} disabled={busy || confirmationMissing || documentMissing} title={documentMissing ? 'ابتدا مدارک لازم همین مرحله را بارگذاری کنید.' : undefined} onClick={() => void act(item.action)}>{item.label}</button>;
           })}</div>
         </>}
       </footer>

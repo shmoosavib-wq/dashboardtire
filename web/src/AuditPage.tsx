@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { api, displayDateTime, faNumber } from './api';
+import { api, displayDateTime, faNumber, formatMoney } from './api';
 import LoadingIndicator from './LoadingIndicator';
 import TablePagination from './TablePagination';
 
@@ -15,6 +15,7 @@ const labels: Record<string, string> = {
   STAGE_DRAFT_SAVED: 'ذخیره پیش‌نویس مرحله', DOCUMENT_UPLOADED: 'بارگذاری مدرک', DOCUMENT_DELETED: 'حذف مدرک',
   DOCUMENT_DOWNLOADED: 'دریافت مدرک', DRIVER_ARCHIVED: 'آرشیو پرونده', DRIVER_RESTORED: 'بازگردانی پرونده',
   STORE_SETTLEMENT_RECORDED: 'ثبت تسویه فروشگاه', STORE_SETTLEMENT_UPDATED: 'ویرایش تسویه فروشگاه',
+  SUPPLIER_SETTLEMENT_RECORDED: 'ثبت پرداخت به تأمین‌کننده', SUPPLIER_DEBT_UPDATED: 'ویرایش بدهی تأمین‌کننده',
 };
 const categories = [
   ['', 'همه رویدادها'], ['workflow', 'گردش فروش'], ['documents', 'مدارک'],
@@ -78,5 +79,8 @@ function format(details: Record<string, unknown>) {
   if (typeof details.note === 'string' && details.note) parts.push('یادداشت: ' + details.note);
   if (typeof details.userId === 'string') parts.push('شناسه کاربر: ' + details.userId.slice(0, 8));
   if (typeof details.amount === 'string') parts.push('مبلغ: ' + details.amount);
+  if (typeof details.storeName === 'string') parts.push('فروشگاه: ' + details.storeName);
+  if (typeof details.previousPayable === 'string' && typeof details.payable === 'string') parts.push(`بدهی کل: ${formatMoney(details.previousPayable)} ← ${formatMoney(details.payable)} تومان`);
+  if (typeof details.paid === 'string') parts.push('پرداخت‌شده: ' + formatMoney(details.paid) + ' تومان');
   return parts.join(' · ') || '—';
 }
