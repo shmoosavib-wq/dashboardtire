@@ -5,7 +5,7 @@ import LoadingIndicator from './LoadingIndicator';
 import { statusLabel } from './driver-panel/labels';
 import { actionButtons, categoriesFor, Field, responsibleName, stageFields, type FieldDef } from './driver-panel/stage-ui';
 import { StageHistory } from './driver-panel/StageHistory';
-import { ArchiveModal, DocumentsTab, HistoryTab, PurchaseSummary, SettlementModal, SettlementTab, UploadButton } from './driver-panel/records';
+import { ArchiveModal, DocumentsTab, HistoryTab, PurchaseSummary, UploadButton } from './driver-panel/records';
 
 const historicalProductFields: FieldDef[] = [
   { name: 'title', label: 'نام کالا' },
@@ -35,7 +35,6 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
   const [editPayload, setEditPayload] = useState<Record<string, unknown>>({});
   const [editError, setEditError] = useState('');
   const [editBusy, setEditBusy] = useState(false);
-  const [settleOpen, setSettleOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const loadVersion = useRef(0);
 
@@ -62,13 +61,12 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
       if (editingStage) setEditingStage(null);
-      else if (settleOpen) setSettleOpen(false);
       else if (archiveOpen) setArchiveOpen(false);
       else onClose();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, settleOpen, archiveOpen, editingStage]);
+  }, [onClose, archiveOpen, editingStage]);
 
   async function saveDraft() {
     if (!driver) return;
@@ -199,7 +197,6 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
       <div className="dossier-stepper"><div className="stage-line">{stageList.map((stage, index) => { const done = stageIndex > index || driver.currentStage === 'COMPLETED'; const current = stage.id === driver.currentStage; return <div className={'stage-node ' + (done ? 'done ' : '') + (current ? 'current' : '')} key={stage.id}><span>{done ? '✓' : faNumber(index + 1)}</span><small>{stage.compact}</small></div>; })}</div><span className="status-pill">{statusLabel[driver.stageStatus] || statusLabel[driver.currentStage]}</span></div>
       <section className="dossier-block"><DossierOverview driver={driver} /></section>
       <section className="dossier-block"><StageHistory driver={driver} user={user} onEdit={editPreviousStage} /></section>
-      <section className="dossier-block"><SettlementTab driver={driver} user={user} onOpen={() => setSettleOpen(true)} /></section>
       <section className="dossier-block"><HistoryTab events={driver.auditEvents || []} /></section>
     </div>
     {editingStage && <div className="workflow-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setEditingStage(null)}>
@@ -221,7 +218,6 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
         <footer className="workflow-dialog-actions"><button className="btn" disabled={editBusy} onClick={() => setEditingStage(null)}>انصراف</button><button className="btn primary" disabled={editBusy} onClick={() => void savePreviousStage()}>{editBusy ? 'در حال ذخیره…' : 'ذخیرهٔ اصلاحات'}</button></footer>
       </section>
     </div>}
-    {settleOpen && <SettlementModal driver={driver} onClose={() => setSettleOpen(false)} onSaved={async () => { setSettleOpen(false); await load(); notify('\u062a\u0633\u0648\u06cc\u0647 \u0641\u0631\u0648\u0634\u06af\u0627\u0647 \u062b\u0628\u062a \u0634\u062f.'); }} />}
     {archiveOpen && <ArchiveModal onClose={() => setArchiveOpen(false)} onSubmit={archive} busy={busy} />}
   </div>;
 
