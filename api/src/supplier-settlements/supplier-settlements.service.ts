@@ -9,6 +9,14 @@ import type { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdateSupplier
 export class SupplierSettlementsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async eligibleDrivers() {
+    return this.prisma.driver.findMany({
+      where: { OR: [{ currentStage: 'COMPLETED' }, { stageStatus: 'COMPLETED' }] },
+      select: { id: true, fullName: true, mobile: true, archivedAt: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
   async addPurchaseProduct(input: AddPurchaseProductDto, actor: AuthenticatedUser) {
     if (!actor.roles.includes(UserRole.SUPER_ADMIN) && !actor.roles.includes(UserRole.LEGAL_FINANCE)) {
       throw new ForbiddenException('افزودن قلم خرید فقط برای نقش مالی مجاز است.');
@@ -17,7 +25,7 @@ export class SupplierSettlementsService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${input.driverId}::uuid FOR UPDATE`;
       const driver = await tx.driver.findFirst({
-        where: { id: input.driverId, currentStage: 'COMPLETED' },
+        where: { id: input.driverId, OR: [{ currentStage: 'COMPLETED' }, { stageStatus: 'COMPLETED' }] },
         select: { id: true, fullName: true, archivedAt: true },
       });
       if (!driver) throw new NotFoundException('پروندهٔ تکمیل‌شدهٔ انتخاب‌شده پیدا نشد.');
@@ -39,7 +47,7 @@ export class SupplierSettlementsService {
   async list(page = 1, pageSize = 10) {
     const currentPage = Math.max(1, Math.floor(page || 1));
     const size = [10, 20, 50].includes(pageSize) ? pageSize : 10;
-    const where = { driver: { currentStage: 'COMPLETED' as const } };
+    const where = { driver: { OR: [{ currentStage: 'COMPLETED' as const }, { stageStatus: 'COMPLETED' }] } };
     const [products, total] = await Promise.all([
       this.prisma.driverProduct.findMany({
         where,

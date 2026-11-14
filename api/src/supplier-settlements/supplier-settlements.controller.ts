@@ -12,6 +12,11 @@ import { SupplierSettlementsService } from './supplier-settlements.service';
 export class SupplierSettlementsController {
   constructor(private readonly settlements: SupplierSettlementsService) {}
 
+  @Get('eligible-drivers')
+  eligibleDrivers() {
+    return this.settlements.eligibleDrivers();
+  }
+
   @Get()
   list(
     @Query('page', new ParseIntPipe({ optional: true })) page?: number,

@@ -9,10 +9,21 @@ const { AuthService } = require('../dist/auth/auth.service.js');
 const { DocumentsService } = require('../dist/drivers/documents.service.js');
 const { DriversService } = require('../dist/drivers/drivers.service.js');
 const { UsersService } = require('../dist/users/users.service.js');
+const { SupplierSettlementsService } = require('../dist/supplier-settlements/supplier-settlements.service.js');
 const { dateOnly, hasRole, nonEmptyText, nonNegativeInteger, positiveMoney, requireRole } = require('../dist/drivers/workflow.js');
 
 // Unit tests keep Prisma in memory; the smoke suite separately checks these flows against local PostgreSQL.
 const actor = (id, ...roles) => ({ id, name: id, username: id, roles });
+
+test('supplier settlement driver picker includes completed cases and keeps the eligibility rule in one API', async () => {
+  let query;
+  const service = new SupplierSettlementsService({
+    driver: { findMany: async (args) => { query = args; return [{ id: 'driver-1' }]; } },
+  });
+  assert.deepEqual(await service.eligibleDrivers(), [{ id: 'driver-1' }]);
+  assert.deepEqual(query.where, { OR: [{ currentStage: 'COMPLETED' }, { stageStatus: 'COMPLETED' }] });
+  assert.deepEqual(query.select, { id: true, fullName: true, mobile: true, archivedAt: true });
+});
 
 test('workflow validation accepts Persian numbers and rejects invalid amounts and dates', () => {
   assert.equal(positiveMoney('۱٬۲۵۰٬۰۰۰', 'amount'), 1250000);

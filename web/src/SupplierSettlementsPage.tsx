@@ -25,11 +25,7 @@ function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; on
   const [error, setError] = useState('');
 
   useEffect(() => {
-    Promise.all([
-      api<Driver[]>('/drivers?stage=COMPLETED'),
-      api<Driver[]>('/drivers?stage=COMPLETED&archived=true'),
-    ]).then(([active, archived]) => {
-      const items = [...active, ...archived];
+    api<Driver[]>('/supplier-settlements/eligible-drivers').then((items) => {
       setDrivers(items);
       if (items.length) setDriverId(items[0].id);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : 'فهرست پرونده‌ها دریافت نشد.'))
