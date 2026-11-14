@@ -17,8 +17,8 @@ export class SupplierSettlementsService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${input.driverId}::uuid FOR UPDATE`;
       const driver = await tx.driver.findFirst({
-        where: { id: input.driverId, currentStage: 'COMPLETED', archivedAt: null },
-        select: { id: true, fullName: true },
+        where: { id: input.driverId, currentStage: 'COMPLETED' },
+        select: { id: true, fullName: true, archivedAt: true },
       });
       if (!driver) throw new NotFoundException('پروندهٔ تکمیل‌شدهٔ انتخاب‌شده پیدا نشد.');
       const product = await tx.driverProduct.create({

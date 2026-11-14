@@ -25,7 +25,11 @@ function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; on
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api<Driver[]>('/drivers?stage=COMPLETED').then((items) => {
+    Promise.all([
+      api<Driver[]>('/drivers?stage=COMPLETED'),
+      api<Driver[]>('/drivers?stage=COMPLETED&archived=true'),
+    ]).then(([active, archived]) => {
+      const items = [...active, ...archived];
       setDrivers(items);
       if (items.length) setDriverId(items[0].id);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : 'فهرست پرونده‌ها دریافت نشد.'))
@@ -55,7 +59,7 @@ function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; on
         <label className="field">پروندهٔ راننده
           <select required value={driverId} disabled={loading || busy || !drivers.length} onChange={(event) => setDriverId(event.target.value)}>
             {!drivers.length && <option value="">{loading ? 'در حال دریافت پرونده‌ها…' : 'پروندهٔ تکمیل‌شده‌ای پیدا نشد'}</option>}
-            {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.fullName} · {faDigits(driver.mobile)}</option>)}
+            {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.fullName} · {faDigits(driver.mobile)}{driver.archivedAt ? ' · آرشیو' : ''}</option>)}
           </select>
         </label>
         <label className="field">عنوان کالا<input required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="مثلاً لاستیک کامیون" /></label>
