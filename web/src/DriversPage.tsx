@@ -83,7 +83,7 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       </div>
       {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
       <div className="table-wrap">
-        <table className="data-table">
+        <table className="data-table mobile-card-table driver-table">
           <thead><tr><th>#</th><th>راننده</th><th>کالا</th><th>مرحله فعلی</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>آخرین تغییر</th><th>اقدام</th></tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={8}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
@@ -91,13 +91,13 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
               : pageDrivers.map((driver, index) => {
                 const stage = stageList.find((item) => item.id === driver.currentStage);
                 return <tr key={driver.id} onDoubleClick={() => onOpen(driver.id)}>
-                  <td className="row-number">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.nationalId ? ' · ' + faDigits(driver.nationalId) : ''}</small></div></div></td>
-                  <td>{driver.productHint || '—'}</td>
-                  <td><span className="stage-label"><i>{driver.currentStage === 'COMPLETED' ? '✓' : faNumber(stageList.findIndex((item) => item.id === driver.currentStage) + 1, { minimumIntegerDigits: 2 })}</i>{stage?.title || 'تکمیل‌شده'}</span></td>
-                  <td><span className={'status-pill ' + (driver.stageStatus === 'COMPLETED' ? 'success' : driver.stageStatus.includes('REJECTED') ? 'warning' : '')}>{statusNames[driver.stageStatus] || statusNames[driver.currentStage] || driver.stageStatus}</span></td>
-                  <td className="responsible-cell">{responsible[driver.currentStage]}</td>
-                  <td className="muted-cell">{displayDate(driver.updatedAt)}</td>
-                  <td><div className="row-actions">{mode === 'flow' && <button className="btn small row-action" onClick={() => onOpen(driver.id, 'flow')}>اقدام <span>←</span></button>}<button className="btn small" onClick={() => onOpen(driver.id, 'dossier')}>مشاهده پرونده</button></div></td>
+                  <td className="row-number" data-label="ردیف">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td data-label="راننده"><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.nationalId ? ' · ' + faDigits(driver.nationalId) : ''}</small></div></div></td>
+                  <td data-label="کالا">{driver.productHint || '—'}</td>
+                  <td data-label="مرحله فعلی"><span className="stage-label"><i>{driver.currentStage === 'COMPLETED' ? '✓' : faNumber(stageList.findIndex((item) => item.id === driver.currentStage) + 1, { minimumIntegerDigits: 2 })}</i>{stage?.title || 'تکمیل‌شده'}</span></td>
+                  <td data-label="وضعیت اقدام"><span className={'status-pill ' + (driver.stageStatus === 'COMPLETED' ? 'success' : driver.stageStatus.includes('REJECTED') ? 'warning' : '')}>{statusNames[driver.stageStatus] || statusNames[driver.currentStage] || driver.stageStatus}</span></td>
+                  <td className="responsible-cell" data-label="مسئول پیگیری">{responsible[driver.currentStage]}</td>
+                  <td className="muted-cell" data-label="آخرین تغییر">{displayDate(driver.updatedAt)}</td>
+                  <td data-label="اقدام"><div className="row-actions">{mode === 'flow' && <button className="btn small row-action" onClick={() => onOpen(driver.id, 'flow')}>اقدام <span>←</span></button>}<button className="btn small" onClick={() => onOpen(driver.id, 'dossier')}>مشاهده پرونده</button></div></td>
                 </tr>;
               })}
           </tbody>

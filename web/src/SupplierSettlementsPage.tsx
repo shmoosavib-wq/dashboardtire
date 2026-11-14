@@ -7,30 +7,32 @@ import type { Driver } from './model';
 
 type Settlement = { id: string; storeName: string; amount: string; settledAt: string; registeredAt: string; registeredBy: { name: string } };
 type SupplierProduct = {
-  id: string; title: string; quantity: number; saleTotal: string | null; payableTotal: string | null;
+  id: string; title: string; quantity: number; saleUnitPrice: string | null; saleTotal: string | null; payableTotal: string | null;
   paidTotal: string; remaining: string | null;
   driver: { id: string; fullName: string; mobile: string; archivedAt: string | null };
   settlements: Settlement[];
 };
 type ProductPage = { items: SupplierProduct[]; total: number; page: number; pageSize: number; totalPages: number };
+const supplierStores = ['فروشگاه هایپر تایرایران', 'فروشگاه معدن تایر شرق'];
 
-function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
+function AddPurchaseProductModal({ product, onClose, onSaved }: { product?: SupplierProduct; onClose: () => void; onSaved: (message: string) => Promise<void> }) {
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [driverId, setDriverId] = useState('');
-  const [title, setTitle] = useState('');
-  const [quantity, setQuantity] = useState('1');
-  const [saleUnitPrice, setSaleUnitPrice] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [driverId, setDriverId] = useState(product?.driver.id ?? '');
+  const [title, setTitle] = useState(product?.title ?? '');
+  const [quantity, setQuantity] = useState(String(product?.quantity ?? 1));
+  const [saleUnitPrice, setSaleUnitPrice] = useState(product?.saleUnitPrice ?? '');
+  const [loading, setLoading] = useState(!product);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (product) return;
     api<Driver[]>('/supplier-settlements/eligible-drivers').then((items) => {
       setDrivers(items);
       if (items.length) setDriverId(items[0].id);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : 'فهرست پرونده‌ها دریافت نشد.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [product]);
 
   async function submit(event: import('react').FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,20 +44,26 @@ function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; on
     }
     setBusy(true); setError('');
     try {
-      await api('/supplier-settlements/products', { method: 'POST', body: jsonBody({ driverId, title: title.trim(), quantity: numericQuantity, saleUnitPrice: numericPrice }) });
-      await onSaved();
+      if (product) {
+        await api(`/supplier-settlements/products/${product.id}`, { method: 'PATCH', body: jsonBody({ title: title.trim(), quantity: numericQuantity, saleUnitPrice: numericPrice }) });
+      } else {
+        await api('/supplier-settlements/products', { method: 'POST', body: jsonBody({ driverId, title: title.trim(), quantity: numericQuantity, saleUnitPrice: numericPrice }) });
+      }
+      await onSaved(product ? 'قلم کالا ویرایش شد.' : 'قلم خرید به فهرست تسویه اضافه شد.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'افزودن قلم خرید انجام نشد.'); }
     finally { setBusy(false); }
   }
 
   return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
     <section className="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="add-purchase-title">
-      <div className="modal-head"><div><div className="eyebrow">ورود قلم خرید قدیمی</div><h2 id="add-purchase-title">افزودن کالا به فهرست تسویه</h2><p>این گزینه برای پرونده‌هایی است که کالایشان در مرحلهٔ پیش‌فاکتور ثبت نشده؛ پرونده‌های مرحلهٔ تحویل هم قابل انتخاب‌اند.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button></div>
+      <div className="modal-head"><div><div className="eyebrow">{product ? 'اصلاح اطلاعات قلم خرید' : 'ورود قلم خرید قدیمی'}</div><h2 id="add-purchase-title">{product ? 'ویرایش قلم کالا' : 'افزودن کالا به فهرست تسویه'}</h2><p>{product ? 'عنوان، تعداد یا قیمت فروش کالا را اصلاح کنید.' : 'این گزینه برای پرونده‌هایی است که کالایشان در مرحلهٔ پیش‌فاکتور ثبت نشده؛ پرونده‌های مرحلهٔ تحویل هم قابل انتخاب‌اند.'}</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button></div>
       <form onSubmit={(event) => void submit(event)}>
         <label className="field">پروندهٔ راننده
-          <select required value={driverId} disabled={loading || busy || !drivers.length} onChange={(event) => setDriverId(event.target.value)}>
-            {!drivers.length && <option value="">{loading ? 'در حال دریافت پرونده‌ها…' : 'پرونده‌ای برای انتخاب پیدا نشد'}</option>}
-            {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.fullName} · {faDigits(driver.mobile)}{driver.archivedAt ? ' · آرشیو' : ''}</option>)}
+          <select required value={driverId} disabled={Boolean(product) || loading || busy || !drivers.length} onChange={(event) => setDriverId(event.target.value)}>
+            {product ? <option value={product.driver.id}>{product.driver.fullName} · {faDigits(product.driver.mobile)}</option> : <>
+              {!drivers.length && <option value="">{loading ? 'در حال دریافت پرونده‌ها…' : 'پرونده‌ای برای انتخاب پیدا نشد'}</option>}
+              {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.fullName} · {faDigits(driver.mobile)}{driver.archivedAt ? ' · آرشیو' : ''}</option>)}
+            </>}
           </select>
         </label>
         <label className="field">عنوان کالا<input required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="مثلاً لاستیک کامیون" /></label>
@@ -64,7 +72,7 @@ function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; on
           <label className="field">قیمت فروش هر واحد (تومان)<input required inputMode="numeric" value={saleUnitPrice ? faDigits(formatMoney(saleUnitPrice)) : ''} onChange={(event) => setSaleUnitPrice(normalizeIntegerInput(event.target.value))} placeholder="مبلغ فروش به راننده" /></label>
         </div>
         {error && <div className="alert error" role="alert">{error}</div>}
-        <div className="modal-actions"><button type="button" className="btn" onClick={onClose} disabled={busy}>انصراف</button><button type="submit" className="btn primary" disabled={loading || busy || !drivers.length}>{busy ? 'در حال ثبت…' : 'افزودن به فهرست'}</button></div>
+        <div className="modal-actions"><button type="button" className="btn" onClick={onClose} disabled={busy}>انصراف</button><button type="submit" className="btn primary" disabled={loading || busy || (!product && !drivers.length)}>{busy ? 'در حال ثبت…' : product ? 'ذخیره تغییرات' : 'افزودن به فهرست'}</button></div>
       </form>
     </section>
   </div>;
@@ -91,15 +99,15 @@ function RecordSettlementModal({ product, debtOnly, onClose, onSaved }: {
     event.preventDefault();
     const numericAmount = Number(asciiDigits(amount).replace(/\D/g, ''));
     const numericPayable = Number(asciiDigits(payableTotal).replace(/\D/g, ''));
-    if (!Number.isSafeInteger(numericPayable) || numericPayable < 1 || numericPayable < Number(product.paidTotal) || (!debtOnly && firstSettlement && !storeName.trim()) || (!debtOnly && (!settledAt || !Number.isSafeInteger(numericAmount) || numericAmount < 1 || numericAmount > remaining))) {
-      setError(numericPayable < Number(product.paidTotal) ? 'مبلغ کل بدهی نمی‌تواند از مجموع پرداخت‌های ثبت‌شده کمتر باشد.' : debtOnly ? 'مبلغ کل بدهی را درست وارد کنید.' : firstSettlement ? 'نام فروشگاه، مبلغ کل بدهی، مبلغ پرداخت و تاریخ را درست وارد کنید.' : 'مبلغ کل بدهی، مبلغ پرداخت و تاریخ را بررسی کنید؛ مبلغ پرداخت نباید از مانده بیشتر باشد.');
+    if (!Number.isSafeInteger(numericPayable) || numericPayable < 1 || numericPayable < Number(product.paidTotal) || ((debtOnly || firstSettlement) && !storeName.trim()) || (!debtOnly && (!settledAt || !Number.isSafeInteger(numericAmount) || numericAmount < 1 || numericAmount > remaining))) {
+      setError(numericPayable < Number(product.paidTotal) ? 'مبلغ کل بدهی نمی‌تواند از مجموع پرداخت‌های ثبت‌شده کمتر باشد.' : ((debtOnly || firstSettlement) && !storeName.trim()) ? 'فروشگاه را از فهرست انتخاب کنید.' : debtOnly ? 'مبلغ کل بدهی را درست وارد کنید.' : firstSettlement ? 'مبلغ کل بدهی، مبلغ پرداخت و تاریخ را درست وارد کنید.' : 'مبلغ کل بدهی، مبلغ پرداخت و تاریخ را بررسی کنید؛ مبلغ پرداخت نباید از مانده بیشتر باشد.');
       return;
     }
     setBusy(true);
     setError('');
     try {
       if (debtOnly) {
-        await api(`/supplier-settlements/products/${product.id}/debt`, { method: 'PATCH', body: jsonBody({ payableTotal: numericPayable }) });
+        await api(`/supplier-settlements/products/${product.id}/debt`, { method: 'PATCH', body: jsonBody({ payableTotal: numericPayable, storeName: storeName.trim() }) });
       } else {
         await api(`/supplier-settlements/products/${product.id}/settlements`, {
           method: 'POST', body: jsonBody({ ...(firstSettlement ? { storeName: storeName.trim() } : {}), payableTotal: numericPayable, amount: numericAmount, settledAt }),
@@ -116,11 +124,12 @@ function RecordSettlementModal({ product, debtOnly, onClose, onSaved }: {
       <div className="modal-head"><div><div className="eyebrow">{debtOnly ? 'اصلاح اطلاعات بدهی' : 'ثبت پرداخت به تأمین‌کننده'}</div><h2 id="supplier-settlement-title">{debtOnly ? 'ویرایش مبلغ کل بدهی' : 'ثبت تسویهٔ کالا'}</h2><p>{product.title} · {product.driver.fullName}</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button></div>
       <div className="supplier-settlement-context"><span>مبلغ فروش به راننده</span><b>{product.saleTotal === null ? 'ثبت نشده' : `${formatMoney(product.saleTotal)} تومان`}</b>{!firstSettlement && <><span>پرداخت‌شده تا امروز</span><b>{formatMoney(product.paidTotal)} تومان</b></>}</div>
       <form onSubmit={(event) => void submit(event)}>
-        {!debtOnly && firstSettlement && <>
-          <label className="field">فروشگاه / تأمین‌کننده
-            <input required maxLength={120} autoFocus value={storeName} onChange={(event) => setStoreName(event.target.value)} placeholder="نام فروشگاه را وارد کنید" />
-          </label>
-        </>}
+        {(debtOnly || firstSettlement) && <label className="field">فروشگاه / تأمین‌کننده
+          <select required autoFocus value={storeName} onChange={(event) => setStoreName(event.target.value)}>
+            <option value="">انتخاب فروشگاه</option>
+            {supplierStores.map((store) => <option key={store} value={store}>{store}</option>)}
+          </select>
+        </label>}
         <label className="field">مبلغ کل بدهی به تأمین‌کننده (تومان)
           <input required inputMode="numeric" value={payableTotal ? faDigits(formatMoney(payableTotal)) : ''} onChange={(event) => setPayableTotal(normalizeIntegerInput(event.target.value))} placeholder="مبلغ کل بدهی" />
           <small>پرداخت‌شده: {formatMoney(product.paidTotal)} تومان · مانده: {formatMoney(String(remaining))} تومان</small>
@@ -144,6 +153,7 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<SupplierProduct | null>(null);
+  const [editingProduct, setEditingProduct] = useState<SupplierProduct | null>(null);
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [debtOnly, setDebtOnly] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -167,9 +177,10 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
     setRefresh((value) => value + 1);
   }
 
-  async function addedProduct() {
+  async function productSaved(message: string) {
     setAddProductOpen(false);
-    notify('قلم خرید به فهرست تسویه اضافه شد.');
+    setEditingProduct(null);
+    notify(message);
     setRefresh((value) => value + 1);
   }
 
@@ -177,18 +188,18 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
     <div className="page-heading"><div><div className="eyebrow">حساب‌های خرید نهایی‌شده</div><h1>تسویه با تأمین‌کنندگان</h1><p>مبلغ فروش از پرونده خوانده می‌شود؛ مبلغ کل بدهی را وارد کنید و پرداخت‌های هر نوبت را از آن کم کنید.</p></div><button type="button" className="btn primary" onClick={() => setAddProductOpen(true)}>افزودن قلم خرید</button></div>
     {error && <div className="alert error" role="alert">{error}<button type="button" className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
     {loading ? <LoadingIndicator label="در حال دریافت کالاهای تحویل‌شده…" /> : !result.items.length ? <div className="empty-state"><b>هنوز کالای تحویل‌شده‌ای برای تسویه ثبت نشده است.</b><span>از «افزودن قلم خرید» برای ثبت دستی کالای پرونده‌های قدیمی استفاده کنید.</span></div> : <>
-      <div className="table-wrap supplier-settlement-table-wrap"><table className="data-table supplier-settlement-table">
+      <div className="table-wrap supplier-settlement-table-wrap"><table className="data-table mobile-card-table supplier-settlement-table">
         <thead><tr><th>#</th><th>کالا</th><th>راننده</th><th>مبلغ فروش</th><th>فروشگاه / تأمین‌کننده</th><th>بدهی تأمین‌کننده</th><th>پرداخت‌شده</th><th>مانده بدهی</th><th>ثبت تسویه</th></tr></thead>
         <tbody>{result.items.map((product, index) => <tr key={product.id}>
-          <td className="row-number">{faNumber((page - 1) * pageSize + index + 1)}</td>
-          <td><b>{product.title}</b><small className="supplier-product-quantity">{faNumber(product.quantity)} عدد</small></td>
-          <td><b>{product.driver.fullName}</b><small className="supplier-product-quantity">{faDigits(product.driver.mobile)}{product.driver.archivedAt ? ' · آرشیو' : ''}</small></td>
-          <td>{product.saleTotal === null ? 'ثبت نشده' : `${formatMoney(product.saleTotal)} تومان`}</td>
-          <td>{product.payableTotal === null ? '—' : product.settlements.at(-1)?.storeName ?? '—'}</td>
-          <td>{product.payableTotal === null ? '—' : `${formatMoney(product.payableTotal)} تومان`}</td>
-          <td>{product.payableTotal === null ? '—' : `${formatMoney(product.paidTotal)} تومان`}</td>
-          <td className={product.remaining && BigInt(product.remaining) > 0n ? 'supplier-balance-open' : ''}>{product.remaining === null ? '—' : `${formatMoney(product.remaining)} تومان`}</td>
-          <td><div className="supplier-settlement-actions"><button type="button" className="btn small primary" disabled={product.remaining !== null && BigInt(product.remaining) <= 0n} onClick={() => { setDebtOnly(false); setSelectedProduct(product); }}>{product.payableTotal === null || (product.remaining !== null && BigInt(product.remaining) > 0n) ? 'ثبت پرداخت' : 'تسویه کامل'}</button>
+          <td className="row-number" data-label="ردیف">{faNumber((page - 1) * pageSize + index + 1)}</td>
+          <td data-label="کالا"><b>{product.title}</b><small className="supplier-product-quantity">{faNumber(product.quantity)} عدد</small></td>
+          <td data-label="راننده"><b>{product.driver.fullName}</b><small className="supplier-product-quantity">{faDigits(product.driver.mobile)}{product.driver.archivedAt ? ' · آرشیو' : ''}</small></td>
+          <td data-label="مبلغ فروش">{product.saleTotal === null ? 'ثبت نشده' : `${formatMoney(product.saleTotal)} تومان`}</td>
+          <td data-label="فروشگاه / تأمین‌کننده">{product.payableTotal === null ? '—' : product.settlements.at(-1)?.storeName ?? '—'}</td>
+          <td data-label="بدهی تأمین‌کننده">{product.payableTotal === null ? '—' : `${formatMoney(product.payableTotal)} تومان`}</td>
+          <td data-label="پرداخت‌شده">{product.payableTotal === null ? '—' : `${formatMoney(product.paidTotal)} تومان`}</td>
+          <td className={product.remaining && BigInt(product.remaining) > 0n ? 'supplier-balance-open' : ''} data-label="مانده بدهی">{product.remaining === null ? '—' : `${formatMoney(product.remaining)} تومان`}</td>
+          <td data-label="اقدام"><div className="supplier-settlement-actions"><button type="button" className="btn small" onClick={() => setEditingProduct(product)}>ویرایش کالا</button><button type="button" className="btn small primary" disabled={product.remaining !== null && BigInt(product.remaining) <= 0n} onClick={() => { setDebtOnly(false); setSelectedProduct(product); }}>{product.payableTotal === null || (product.remaining !== null && BigInt(product.remaining) > 0n) ? 'ثبت پرداخت' : 'تسویه کامل'}</button>
             {product.payableTotal !== null && <button type="button" className="btn small" onClick={() => { setDebtOnly(true); setSelectedProduct(product); }}>ویرایش بدهی</button>}</div>
             {product.settlements.length > 0 && <details className="supplier-payment-history"><summary>{faNumber(product.settlements.length)} پرداخت ثبت‌شده</summary><div>{product.settlements.map((settlement) => <p key={settlement.id}><b>{settlement.storeName}</b><span>{formatMoney(settlement.amount)} تومان · {displayDate(settlement.settledAt)}</span><small>ثبت‌کننده: {settlement.registeredBy.name}</small></p>)}</div></details>}
           </td>
@@ -197,6 +208,7 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
       <TablePagination page={page} pageSize={pageSize} total={result.total} disabled={loading} itemLabel="قلم کالا" onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size); }} />
     </>}
     {selectedProduct && <RecordSettlementModal product={selectedProduct} debtOnly={debtOnly} onClose={() => setSelectedProduct(null)} onSaved={saved} />}
-    {addProductOpen && <AddPurchaseProductModal onClose={() => setAddProductOpen(false)} onSaved={addedProduct} />}
+    {addProductOpen && <AddPurchaseProductModal onClose={() => setAddProductOpen(false)} onSaved={productSaved} />}
+    {editingProduct && <AddPurchaseProductModal product={editingProduct} onClose={() => setEditingProduct(null)} onSaved={productSaved} />}
   </div>;
 }

@@ -16,7 +16,7 @@ const labels: Record<string, string> = {
   DOCUMENT_DOWNLOADED: 'دریافت مدرک', DRIVER_ARCHIVED: 'آرشیو پرونده', DRIVER_RESTORED: 'بازگردانی پرونده',
   STORE_SETTLEMENT_RECORDED: 'ثبت تسویه فروشگاه', STORE_SETTLEMENT_UPDATED: 'ویرایش تسویه فروشگاه',
   SUPPLIER_SETTLEMENT_RECORDED: 'ثبت پرداخت به تأمین‌کننده', SUPPLIER_DEBT_UPDATED: 'ویرایش بدهی تأمین‌کننده',
-  SUPPLIER_PURCHASE_PRODUCT_ADDED: 'افزودن قلم خرید برای تسویه', WORKFLOW_STAGE_REOPENED: 'بازگشت پرونده به مرحلهٔ قبل',
+  SUPPLIER_PURCHASE_PRODUCT_ADDED: 'افزودن قلم خرید برای تسویه', SUPPLIER_PURCHASE_PRODUCT_UPDATED: 'ویرایش قلم خرید برای تسویه', WORKFLOW_STAGE_REOPENED: 'بازگشت پرونده به مرحلهٔ قبل',
 };
 const categories = [
   ['', 'همه رویدادها'], ['workflow', 'گردش فروش'], ['documents', 'مدارک'],

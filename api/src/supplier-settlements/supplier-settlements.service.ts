@@ -3,7 +3,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
 import { dateOnly, nonEmptyText, positiveMoney } from '../drivers/workflow';
-import type { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
+import { SUPPLIER_STORE_NAMES, type AddPurchaseProductDto, type CreateSupplierSettlementDto, type UpdatePurchaseProductDto, type UpdateSupplierDebtDto } from './supplier-settlements.dto';
 
 const settlementDriverStages = ['COMPLETED', 'DELIVERY_FINAL_DOCS'] as const;
 
@@ -46,6 +46,47 @@ export class SupplierSettlementsService {
     });
   }
 
+  async updatePurchaseProduct(productId: string, input: UpdatePurchaseProductDto, actor: AuthenticatedUser) {
+    if (!actor.roles.includes(UserRole.SUPER_ADMIN) && !actor.roles.includes(UserRole.LEGAL_FINANCE)) {
+      throw new ForbiddenException('ویرایش قلم خرید فقط برای نقش مالی مجاز است.');
+    }
+    const title = nonEmptyText(input.title, 'عنوان کالا');
+    const saleUnitPrice = BigInt(positiveMoney(input.saleUnitPrice, 'قیمت فروش هر واحد'));
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "DriverProduct" WHERE "id" = ${productId}::uuid FOR UPDATE`;
+      const product = await tx.driverProduct.findUnique({
+        where: { id: productId },
+        include: { driver: { select: { id: true, fullName: true, mobile: true, archivedAt: true, currentStage: true, stageStatus: true } } },
+      });
+      if (!product || (!settlementDriverStages.some((stage) => stage === product.driver.currentStage) && product.driver.stageStatus !== 'COMPLETED')) {
+        throw new NotFoundException('قلم کالای قابل ویرایش در پروندهٔ تحویل یا تکمیل‌شده پیدا نشد.');
+      }
+      const saleTotal = saleUnitPrice * BigInt(input.quantity);
+      const updated = await tx.driverProduct.update({
+        where: { id: productId },
+        data: { title, quantity: input.quantity, saleUnitPrice },
+      });
+      await tx.supplierSettlementRecord.updateMany({
+        where: { productId },
+        data: { productTitleSnapshot: title, quantitySnapshot: input.quantity, saleTotalSnapshot: saleTotal },
+      });
+      await tx.auditEvent.create({
+        data: {
+          driverId: product.driver.id,
+          actorId: actor.id,
+          eventType: 'SUPPLIER_PURCHASE_PRODUCT_UPDATED',
+          details: {
+            productId,
+            previous: { title: product.title, quantity: product.quantity, saleUnitPrice: product.saleUnitPrice?.toString() ?? null },
+            updated: { title, quantity: input.quantity, saleUnitPrice: String(saleUnitPrice) },
+          },
+        },
+      });
+      return { id: updated.id, title: updated.title, quantity: updated.quantity, saleUnitPrice: String(saleUnitPrice), saleTotal: String(saleTotal), driver: product.driver };
+    });
+  }
+
   async list(page = 1, pageSize = 10) {
     const currentPage = Math.max(1, Math.floor(page || 1));
     const size = [10, 20, 50].includes(pageSize) ? pageSize : 10;
@@ -78,6 +119,7 @@ export class SupplierSettlementsService {
           title: snapshot?.productTitleSnapshot ?? product.title,
           quantity: snapshot?.quantitySnapshot ?? product.quantity,
           saleTotal: saleTotal === null ? null : String(saleTotal),
+          saleUnitPrice: product.saleUnitPrice === null ? null : String(product.saleUnitPrice),
           payableTotal: payable === null ? null : String(payable),
           paidTotal: String(paid),
           remaining: payable === null ? null : String(payable - paid),
@@ -117,6 +159,9 @@ export class SupplierSettlementsService {
       const payable = BigInt(positiveMoney(input.payableTotal, 'مبلغ کل بدهی به تأمین‌کننده'));
       const storeName = nonEmptyText(snapshot?.storeName ?? input.storeName, 'نام فروشگاه');
       if (storeName.length > 120) throw new BadRequestException('نام فروشگاه نباید بیشتر از ۱۲۰ نویسه باشد.');
+      if (!snapshot && !SUPPLIER_STORE_NAMES.includes(storeName as typeof SUPPLIER_STORE_NAMES[number])) {
+        throw new BadRequestException('فروشگاه را از فهرست فروشگاه‌های مجاز انتخاب کنید.');
+      }
       const paid = product.supplierSettlements.reduce((sum, entry) => sum + entry.amount, 0n);
       if (payable < paid) throw new BadRequestException('مبلغ کل بدهی نمی‌تواند از مجموع پرداخت‌های ثبت‌شده کمتر باشد.');
       if (amount > payable - paid) throw new BadRequestException('مبلغ پرداخت از ماندهٔ بدهی به تأمین‌کننده بیشتر است.');
@@ -161,23 +206,28 @@ export class SupplierSettlementsService {
       throw new ForbiddenException('ویرایش بدهی فقط برای نقش مالی مجاز است.');
     }
     const payable = BigInt(positiveMoney(input.payableTotal, 'مبلغ کل بدهی به تأمین‌کننده'));
+    const storeName = nonEmptyText(input.storeName, 'فروشگاه / تأمین‌کننده');
+    if (!SUPPLIER_STORE_NAMES.includes(storeName as typeof SUPPLIER_STORE_NAMES[number])) {
+      throw new BadRequestException('فروشگاه را از فهرست فروشگاه‌های مجاز انتخاب کنید.');
+    }
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "DriverProduct" WHERE "id" = ${productId}::uuid FOR UPDATE`;
       const product = await tx.driverProduct.findUnique({
         where: { id: productId },
-        include: { driver: { select: { id: true, currentStage: true, stageStatus: true } }, supplierSettlements: { orderBy: { createdAt: 'asc' }, select: { amount: true, payableTotalSnapshot: true } } },
+        include: { driver: { select: { id: true, currentStage: true, stageStatus: true } }, supplierSettlements: { orderBy: { createdAt: 'asc' }, select: { amount: true, payableTotalSnapshot: true, storeName: true } } },
       });
       if (!product || (!settlementDriverStages.some((stage) => stage === product.driver.currentStage) && product.driver.stageStatus !== 'COMPLETED') || product.supplierSettlements.length === 0) throw new NotFoundException('تسویهٔ ثبت‌شده برای این کالا پیدا نشد.');
       const paid = product.supplierSettlements.reduce((sum, entry) => sum + entry.amount, 0n);
       if (payable < paid) throw new BadRequestException('مبلغ کل بدهی نمی‌تواند از مجموع پرداخت‌های ثبت‌شده کمتر باشد.');
       const previousPayable = product.supplierSettlements.at(-1)!.payableTotalSnapshot;
-      await tx.supplierSettlementRecord.updateMany({ where: { productId }, data: { payableTotalSnapshot: payable } });
+      const previousStoreName = product.supplierSettlements.at(-1)!.storeName;
+      await tx.supplierSettlementRecord.updateMany({ where: { productId }, data: { payableTotalSnapshot: payable, storeName } });
       await tx.auditEvent.create({
         data: {
           driverId: product.driver.id,
           actorId: actor.id,
           eventType: 'SUPPLIER_DEBT_UPDATED',
-          details: { productId, previousPayable: String(previousPayable), payable: String(payable), paid: String(paid) },
+          details: { productId, previousPayable: String(previousPayable), payable: String(payable), paid: String(paid), previousStoreName, storeName },
         },
       });
       return { productId, payableTotal: String(payable), paidTotal: String(paid), remaining: String(payable - paid) };

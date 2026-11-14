@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import { AuthGuard } from '../common/auth.guard';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth';
 import { Roles, RolesGuard } from '../common/roles.guard';
-import { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
+import { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdatePurchaseProductDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
 import { SupplierSettlementsService } from './supplier-settlements.service';
 
 @UseGuards(AuthGuard, RolesGuard)
@@ -28,6 +28,15 @@ export class SupplierSettlementsController {
   @Post('products')
   addPurchaseProduct(@Body() body: AddPurchaseProductDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.settlements.addPurchaseProduct(body, actor);
+  }
+
+  @Patch('products/:productId')
+  updatePurchaseProduct(
+    @Param('productId', ParseUUIDPipe) productId: string,
+    @Body() body: UpdatePurchaseProductDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.settlements.updatePurchaseProduct(productId, body, actor);
   }
 
   @Post('products/:productId/settlements')

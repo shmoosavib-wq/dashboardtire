@@ -330,3 +330,170 @@ html[data-theme="dark"] .supplier-payment-history>div,html[data-theme="dark"] .s
 .workflow-dialog .stage-document-replace{grid-column:2/4;grid-row:2;min-width:0;margin:0;flex-basis:auto;line-height:1.6;overflow-wrap:anywhere}
 .supplier-settlement-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .supplier-settlement-actions>.btn{white-space:nowrap}
+
+/* Readability and responsive navigation for everyday use. */
+:root{--muted:#667d8e}
+body{font-size:14px;line-height:1.55}
+.brand small,.nav-caption,.sidebar-footer,.user-menu small,.theme-toggle,.text-button,.eyebrow,.toolbar-note,.table-pagination,.audit-pagination{font-size:12px}
+.page-heading p,.auth-form>p{font-size:13px;line-height:1.65;color:#637b8d}
+.auth-form label,.field,.role-select legend,.role-select label{font-size:12px}
+.auth-form label small,.optional,.field small,.supplier-settlement-modal .field small{font-size:11px;color:#667d8e}
+.auth-form label small{color:#62798a}
+.auth-form input,.field input,.field textarea,.field select,.audit-controls select,.search-box input{font-size:14px}
+.btn{min-height:42px;font-size:13px}
+.btn.small{min-height:38px;padding:0 11px;font-size:12px}
+.page-heading>.btn{min-height:42px;font-size:13px}
+.data-table th{height:48px;color:#637b8d;font-size:12px}
+.data-table td{font-size:13px;line-height:1.55}
+.driver-cell strong{font-size:13px}
+.driver-cell small,.responsible-cell,.muted-cell{font-size:11px!important;color:#667d8e}
+.stage-label{font-size:12px}
+.stage-label i{font-size:10px}
+.status-pill{font-size:11px}
+.summary-strip small,.role-tags span,.dossier-facts small,.dossier-records>div,.dossier-status small{font-size:11px}
+.dossier-facts b{font-size:13px}
+.drawer-title small,.drawer-title .eyebrow,.stage-context p,.draft-meta,.review-notice,.check-field,.hint,.rejected-note,.workflow-context,.modal-head p{font-size:12px}
+.stage-node small,.input-unit span,.workflow-context b,.workflow-context span{font-size:11px}
+.detail-tabs button{font-size:12px}
+.detail-tabs button span,.stage-node>span{font-size:10px}
+.document-upload-box b,.document-group h4,.document-main b,.timeline-event b,.finance-summary h4,.section-head h4{font-size:12px}
+.document-upload-box small,.document-group h4 span,.document-main small,.timeline-event p,.timeline-event small,.finance-summary>div,.settlement-card small,.settlement-card b small,.count-chip,.stage-document-name small,.stage-document-replace{font-size:11px}
+.file-type{font-size:9px}
+.settlement-card b,.stage-document-name b{font-size:13px}
+.dossier-section h3,.stage-history-title strong{font-size:14px}
+.stage-history-title small,.stage-history-empty,.stage-history-row dt,.stage-history-row dd,.stage-history-products>div{font-size:12px}
+.historical-products>.section-head h4{font-size:13px}
+.historical-products>.section-head p,.historical-product-row .field{font-size:11px}
+.persian-calendar-head strong{font-size:13px}
+.persian-weekday{font-size:11px}
+.persian-calendar-grid button{font-size:12px}
+.table-pagination select{height:40px;font-size:13px}
+.table-pagination .btn{min-height:40px}
+.supplier-product-quantity,.supplier-payment-history,.supplier-settlement-modal .field{font-size:12px}
+.supplier-settlement-modal .field input{font-size:14px}
+.supplier-settlement-context{font-size:12px}
+.timeline-older{margin-top:4px;padding-top:10px;border-top:1px solid var(--line)}
+.timeline-older summary{padding:8px 0;color:var(--teal-dark);font-size:12px;font-weight:600;cursor:pointer}
+html[data-theme="dark"] .timeline-older summary{color:#7ae2d4}
+
+@media(max-width:760px){
+  .sidebar{inset:auto 0 0;width:100%;height:auto;min-height:64px;padding:5px 8px calc(5px + env(safe-area-inset-bottom));border-top:1px solid #ffffff20}
+  .brand,.nav-caption,.sidebar-footer{display:none}
+  .sidebar nav{margin:0;flex-direction:row;gap:4px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#587287 transparent}
+  .nav-item,.nav-item:not(.active),.nav-item.active{display:flex;flex:0 0 auto;min-width:76px;min-height:54px;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 10px;font-size:11px;text-align:center;white-space:nowrap}
+  .nav-icon{width:auto;font-size:16px}
+  .workspace{margin-right:0;width:100%}
+  .topbar{height:58px;padding:0 12px}
+  .breadcrumbs{font-size:12px}
+  .page-content{padding:18px 12px 94px}
+  .page-heading>.btn{min-height:40px;padding:0 10px;font-size:12px}
+  .drawer-title .eyebrow{font-size:11px}
+  .drawer-title h2{font-size:15px}
+  .drawer-title small,.drawer-head-actions .btn{font-size:11px}
+  .stage-node small{font-size:10px}
+  .drawer-stagebar>.status-pill{font-size:10px}
+  .detail-tabs button{font-size:11px}
+  .summary-strip small{font-size:10px}
+  .summary-strip b{font-size:13px}
+  .mobile-card-table{display:block;width:100%;min-width:0;}
+  .mobile-card-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+  .mobile-card-table tbody{display:grid;gap:10px}
+  .mobile-card-table tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 12px;margin:0;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--paper)}
+  .mobile-card-table tbody td{display:flex;min-width:0;height:auto;min-height:42px;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;padding:7px 4px;border:0;white-space:normal;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+  .mobile-card-table tbody td[data-label]::before{content:attr(data-label);color:var(--muted);font-size:10px;font-weight:600}
+  .mobile-card-table tbody td.row-number{grid-column:1/-1;min-height:20px;justify-content:flex-start;padding:0 4px;font-size:11px;text-align:right}
+  .mobile-card-table tbody td:nth-child(2),.mobile-card-table tbody td:nth-child(3),.mobile-card-table tbody td:last-child,.mobile-card-table tbody td[colspan]{grid-column:1/-1}
+  .mobile-card-table tbody td:nth-child(2){padding-bottom:10px;border-bottom:1px solid var(--line)}
+  .mobile-card-table tbody td:last-child{padding-top:10px;border-top:1px solid var(--line)}
+  .mobile-card-table .driver-cell{min-width:0}
+  .mobile-card-table .driver-cell strong,.mobile-card-table tbody td:nth-child(2)>b{font-size:14px}
+  .mobile-card-table .driver-cell small,.mobile-card-table .supplier-product-quantity{font-size:11px!important}
+  .mobile-card-table .row-actions,.mobile-card-table .supplier-settlement-actions{display:flex;width:100%;flex-wrap:wrap;gap:8px}
+  .mobile-card-table .row-actions>.btn,.mobile-card-table .supplier-settlement-actions>.btn{flex:1 1 125px;min-height:40px;white-space:normal}
+  .supplier-settlement-table-wrap{overflow:visible;background:transparent;border:0;box-shadow:none}
+  .table-pagination{gap:8px}
+}
+
+/* Laptop readability, stable table actions, and dossier overflow fixes. */
+body{font-size:15px;line-height:1.6}
+.page-stack{gap:26px}
+.page-heading{margin-bottom:8px;gap:24px}
+.page-heading h1{font-size:27px}
+.page-heading p{font-size:14px;line-height:1.75}
+.eyebrow,.toolbar-note,.table-pagination,.audit-pagination{font-size:13px}
+.data-table th{font-size:13px}
+.data-table td{font-size:14px;line-height:1.6}
+.driver-cell strong{font-size:14px}
+.driver-cell small,.responsible-cell,.muted-cell{font-size:12px!important}
+.stage-label{font-size:13px}
+.status-pill{font-size:12px}
+.btn{font-size:14px}
+.btn.small{min-height:40px;padding:0 10px;font-size:12px}
+.row-actions{flex-wrap:nowrap;align-items:center}
+.driver-table{min-width:1020px}
+.driver-table th:last-child,.driver-table td:last-child{min-width:280px}
+.driver-table .row-actions>.btn{flex:0 0 auto}
+.driver-table th:last-child,.driver-table td:last-child{position:sticky;left:0;z-index:2;background:var(--paper);box-shadow:-8px 0 12px -10px #071b2b80}
+.supplier-settlement-table{min-width:1080px}
+.supplier-settlement-table th:last-child,.supplier-settlement-table td:last-child{min-width:360px}
+.supplier-settlement-table th:last-child,.supplier-settlement-table td:last-child{position:sticky;left:0;z-index:2;background:var(--paper);box-shadow:-8px 0 12px -10px #071b2b80}
+.supplier-settlement-actions{flex-wrap:nowrap;align-items:center;gap:6px}
+.supplier-settlement-actions>.btn{min-height:38px;padding-inline:8px;font-size:12px}
+.dossier-sections{grid-template-columns:minmax(0,1fr)}
+.dossier-sections>*,.dossier-block,.dossier-overview,.dossier-section,.dossier-block>.tab-content{min-width:0;max-width:100%}
+.dossier-facts>div,.dossier-facts b{min-width:0;overflow-wrap:anywhere}
+.dossier-block>.tab-content>.section-head,.stage-history>.section-head{margin-bottom:20px}
+.document-groups{grid-template-columns:repeat(2,minmax(0,1fr));min-width:0}
+.document-group{min-width:0}
+.document-group h4{min-width:0;overflow-wrap:anywhere}
+.dossier-section h3,.stage-history-title strong{font-size:16px}
+.dossier-facts small,.dossier-records>div,.dossier-status small,.stage-history-title small,.stage-history-empty,.stage-history-row dt,.stage-history-products>div{font-size:13px}
+.dossier-facts b,.stage-history-row dd{font-size:14px}
+.stage-history-row header{min-width:0}
+.stage-history-row header>.btn{flex:0 0 auto;margin-inline-start:auto}
+html[data-theme="dark"] .stage-history-row dt{font-size:13px}
+html[data-theme="dark"] .stage-history-row dd{font-size:14px}
+html[data-theme="dark"] .stage-history-title strong{font-size:16px}
+html[data-theme="dark"] .stage-history-title small{font-size:12px}
+html[data-theme="dark"] .section-head h3,html[data-theme="dark"] .section-head h4{font-size:15px}
+html[data-theme="dark"] .section-head p{font-size:13px;line-height:1.65}
+html[data-theme="dark"] .document-upload-box small,html[data-theme="dark"] .document-main small,html[data-theme="dark"] .timeline-event p,html[data-theme="dark"] .timeline-event small{font-size:12px}
+html[data-theme="dark"] .dossier-driver-head small,html[data-theme="dark"] .dossier-cycle-count{font-size:12px}
+.section-head h3,.section-head h4{font-size:15px}
+.section-head p{font-size:13px;line-height:1.65}
+.stage-history-title strong{font-size:16px}
+.stage-history-title small{font-size:12px}
+.document-upload-box small,.document-main small,.timeline-event p,.timeline-event small{font-size:12px}
+.dossier-driver-head small,.dossier-cycle-count{font-size:12px}
+
+@media(max-width:1100px) and (min-width:761px){
+  .page-content{padding-inline:18px}
+  .data-table th{padding-inline:10px}
+  .data-table td{padding-inline:10px}
+  .driver-table{min-width:1000px}
+  .supplier-settlement-table{min-width:1080px}
+}
+
+@media(max-width:760px){
+  .page-stack{gap:20px}
+  .page-heading{margin-bottom:4px;gap:12px}
+  .page-heading h1{font-size:22px}
+  .page-heading p{font-size:13px}
+  .section-head p{font-size:12px}
+  .stage-history-title strong{font-size:15px}
+  .stage-history-title small{font-size:12px}
+  .data-table td{font-size:13px}
+  .btn{font-size:13px}
+  .row-actions,.supplier-settlement-actions{flex-wrap:wrap}
+  .driver-table th:last-child,.driver-table td:last-child,
+  .supplier-settlement-table th:last-child,.supplier-settlement-table td:last-child{min-width:0}
+  .driver-table th:last-child,.driver-table td:last-child,
+  .supplier-settlement-table th:last-child,.supplier-settlement-table td:last-child{position:static;box-shadow:none}
+  .driver-table .row-actions>.btn{flex:1 1 125px}
+  .supplier-settlement-actions>.btn{font-size:12px}
+  .dossier-sections{gap:16px}
+  .document-groups{grid-template-columns:1fr}
+  .dossier-block>.tab-content>.section-head,.stage-history>.section-head{margin-bottom:15px}
+  .dossier-section h3,.stage-history-title strong{font-size:15px}
+  .stage-history-row dd,.dossier-facts b{font-size:13px}
+}
