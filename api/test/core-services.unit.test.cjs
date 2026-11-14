@@ -15,13 +15,13 @@ const { dateOnly, hasRole, nonEmptyText, nonNegativeInteger, positiveMoney, requ
 // Unit tests keep Prisma in memory; the smoke suite separately checks these flows against local PostgreSQL.
 const actor = (id, ...roles) => ({ id, name: id, username: id, roles });
 
-test('supplier settlement driver picker includes completed cases and keeps the eligibility rule in one API', async () => {
+test('supplier settlement driver picker includes delivery and completed cases in one API', async () => {
   let query;
   const service = new SupplierSettlementsService({
     driver: { findMany: async (args) => { query = args; return [{ id: 'driver-1' }]; } },
   });
   assert.deepEqual(await service.eligibleDrivers(), [{ id: 'driver-1' }]);
-  assert.deepEqual(query.where, { OR: [{ currentStage: 'COMPLETED' }, { stageStatus: 'COMPLETED' }] });
+  assert.deepEqual(query.where, { OR: [{ currentStage: { in: ['COMPLETED', 'DELIVERY_FINAL_DOCS'] } }, { stageStatus: 'COMPLETED' }] });
   assert.deepEqual(query.select, { id: true, fullName: true, mobile: true, archivedAt: true });
 });
 

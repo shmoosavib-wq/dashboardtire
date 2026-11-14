@@ -5,13 +5,15 @@ import { PrismaService } from '../prisma.service';
 import { dateOnly, nonEmptyText, positiveMoney } from '../drivers/workflow';
 import type { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
 
+const settlementDriverStages = ['COMPLETED', 'DELIVERY_FINAL_DOCS'] as const;
+
 @Injectable()
 export class SupplierSettlementsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async eligibleDrivers() {
     return this.prisma.driver.findMany({
-      where: { OR: [{ currentStage: 'COMPLETED' }, { stageStatus: 'COMPLETED' }] },
+      where: { OR: [{ currentStage: { in: [...settlementDriverStages] } }, { stageStatus: 'COMPLETED' }] },
       select: { id: true, fullName: true, mobile: true, archivedAt: true },
       orderBy: { updatedAt: 'desc' },
     });
@@ -25,10 +27,10 @@ export class SupplierSettlementsService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${input.driverId}::uuid FOR UPDATE`;
       const driver = await tx.driver.findFirst({
-        where: { id: input.driverId, OR: [{ currentStage: 'COMPLETED' }, { stageStatus: 'COMPLETED' }] },
+        where: { id: input.driverId, OR: [{ currentStage: { in: [...settlementDriverStages] } }, { stageStatus: 'COMPLETED' }] },
         select: { id: true, fullName: true, archivedAt: true },
       });
-      if (!driver) throw new NotFoundException('پروندهٔ تکمیل‌شدهٔ انتخاب‌شده پیدا نشد.');
+      if (!driver) throw new NotFoundException('پروندهٔ انتخاب‌شده در مرحلهٔ تحویل یا تکمیل‌شده پیدا نشد.');
       const product = await tx.driverProduct.create({
         data: { driverId: driver.id, title, quantity: input.quantity, saleUnitPrice: BigInt(input.saleUnitPrice) },
       });
@@ -47,7 +49,7 @@ export class SupplierSettlementsService {
   async list(page = 1, pageSize = 10) {
     const currentPage = Math.max(1, Math.floor(page || 1));
     const size = [10, 20, 50].includes(pageSize) ? pageSize : 10;
-    const where = { driver: { OR: [{ currentStage: 'COMPLETED' as const }, { stageStatus: 'COMPLETED' }] } };
+    const where = { driver: { OR: [{ currentStage: { in: [...settlementDriverStages] } }, { stageStatus: 'COMPLETED' }] } };
     const [products, total] = await Promise.all([
       this.prisma.driverProduct.findMany({
         where,
@@ -108,9 +110,9 @@ export class SupplierSettlementsService {
       await tx.$queryRaw`SELECT "id" FROM "DriverProduct" WHERE "id" = ${productId}::uuid FOR UPDATE`;
       const product = await tx.driverProduct.findUnique({
         where: { id: productId },
-        include: { driver: { select: { id: true, currentStage: true } }, supplierSettlements: { orderBy: { createdAt: 'asc' }, select: { amount: true, storeName: true, productTitleSnapshot: true, quantitySnapshot: true, saleTotalSnapshot: true, payableTotalSnapshot: true } } },
+        include: { driver: { select: { id: true, currentStage: true, stageStatus: true } }, supplierSettlements: { orderBy: { createdAt: 'asc' }, select: { amount: true, storeName: true, productTitleSnapshot: true, quantitySnapshot: true, saleTotalSnapshot: true, payableTotalSnapshot: true } } },
       });
-      if (!product || product.driver.currentStage !== 'COMPLETED') throw new NotFoundException('کالای تحویل‌شده پیدا نشد.');
+      if (!product || (!settlementDriverStages.some((stage) => stage === product.driver.currentStage) && product.driver.stageStatus !== 'COMPLETED')) throw new NotFoundException('کالای تحویل‌شده پیدا نشد.');
       const snapshot = product.supplierSettlements.at(-1);
       const payable = BigInt(positiveMoney(input.payableTotal, 'مبلغ کل بدهی به تأمین‌کننده'));
       const storeName = nonEmptyText(snapshot?.storeName ?? input.storeName, 'نام فروشگاه');
@@ -163,9 +165,9 @@ export class SupplierSettlementsService {
       await tx.$queryRaw`SELECT "id" FROM "DriverProduct" WHERE "id" = ${productId}::uuid FOR UPDATE`;
       const product = await tx.driverProduct.findUnique({
         where: { id: productId },
-        include: { driver: { select: { id: true, currentStage: true } }, supplierSettlements: { orderBy: { createdAt: 'asc' }, select: { amount: true, payableTotalSnapshot: true } } },
+        include: { driver: { select: { id: true, currentStage: true, stageStatus: true } }, supplierSettlements: { orderBy: { createdAt: 'asc' }, select: { amount: true, payableTotalSnapshot: true } } },
       });
-      if (!product || product.driver.currentStage !== 'COMPLETED' || product.supplierSettlements.length === 0) throw new NotFoundException('تسویهٔ ثبت‌شده برای این کالا پیدا نشد.');
+      if (!product || (!settlementDriverStages.some((stage) => stage === product.driver.currentStage) && product.driver.stageStatus !== 'COMPLETED') || product.supplierSettlements.length === 0) throw new NotFoundException('تسویهٔ ثبت‌شده برای این کالا پیدا نشد.');
       const paid = product.supplierSettlements.reduce((sum, entry) => sum + entry.amount, 0n);
       if (payable < paid) throw new BadRequestException('مبلغ کل بدهی نمی‌تواند از مجموع پرداخت‌های ثبت‌شده کمتر باشد.');
       const previousPayable = product.supplierSettlements.at(-1)!.payableTotalSnapshot;

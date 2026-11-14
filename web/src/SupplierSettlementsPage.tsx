@@ -50,11 +50,11 @@ function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; on
 
   return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
     <section className="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="add-purchase-title">
-      <div className="modal-head"><div><div className="eyebrow">ورود قلم خرید قدیمی</div><h2 id="add-purchase-title">افزودن کالا به فهرست تسویه</h2><p>این گزینه برای پرونده‌های تکمیل‌شده‌ای است که کالایشان در مرحلهٔ پیش‌فاکتور ثبت نشده.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button></div>
+      <div className="modal-head"><div><div className="eyebrow">ورود قلم خرید قدیمی</div><h2 id="add-purchase-title">افزودن کالا به فهرست تسویه</h2><p>این گزینه برای پرونده‌هایی است که کالایشان در مرحلهٔ پیش‌فاکتور ثبت نشده؛ پرونده‌های مرحلهٔ تحویل هم قابل انتخاب‌اند.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button></div>
       <form onSubmit={(event) => void submit(event)}>
         <label className="field">پروندهٔ راننده
           <select required value={driverId} disabled={loading || busy || !drivers.length} onChange={(event) => setDriverId(event.target.value)}>
-            {!drivers.length && <option value="">{loading ? 'در حال دریافت پرونده‌ها…' : 'پروندهٔ تکمیل‌شده‌ای پیدا نشد'}</option>}
+            {!drivers.length && <option value="">{loading ? 'در حال دریافت پرونده‌ها…' : 'پرونده‌ای برای انتخاب پیدا نشد'}</option>}
             {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.fullName} · {faDigits(driver.mobile)}{driver.archivedAt ? ' · آرشیو' : ''}</option>)}
           </select>
         </label>
