@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { WorkflowStage } from '@prisma/client';
 import { AuthGuard } from '../common/auth.guard';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth';
@@ -37,6 +37,11 @@ export class DriversController {
   @Post(':id/actions')
   action(@Param('id') id: string, @Body() body: WorkflowActionDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.drivers.action(id, body, actor);
+  }
+
+  @Post(':id/back')
+  backToPreviousStage(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.drivers.backToPreviousStage(id, actor);
   }
 
   @Post(':id/archive')

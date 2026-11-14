@@ -348,7 +348,8 @@ export class DriversService {
       });
       if (action === 'SUBMIT_PROFORMA' && payload.products !== undefined) {
         const products = this.cleanProducts(payload.products);
-        await tx.driverProduct.createMany({
+        const existingProducts = await tx.driverProduct.count({ where: { driverId: id } });
+        if (existingProducts === 0) await tx.driverProduct.createMany({
           data: products.map((product) => ({
             driverId: id,
             title: product.title,
@@ -379,6 +380,32 @@ export class DriversService {
         }
       }
       await tx.auditEvent.create({ data: { driverId: id, actorId: actor.id, eventType: `WORKFLOW_${action}`, details } });
+      return tx.driver.findUnique({ where: { id } });
+    });
+  }
+
+  async backToPreviousStage(id: string, actor: AuthenticatedUser) {
+    if (!actor.roles.includes(UserRole.SUPER_ADMIN) && !actor.roles.includes(UserRole.SALES_OPERATIONS) && !actor.roles.includes(UserRole.LEGAL_FINANCE)) {
+      throw new ForbiddenException('برای بازگرداندن پرونده به مرحلهٔ قبل دسترسی ندارید.');
+    }
+    const driver = await this.getActiveDriver(id);
+    const currentIndex = stages.indexOf(driver.currentStage);
+    if (currentIndex <= 0) throw new BadRequestException('این پرونده مرحلهٔ قبلی ندارد.');
+    const previousStage = stages[currentIndex - 1];
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.driver.updateMany({
+        where: { id, currentStage: driver.currentStage, stageStatus: driver.stageStatus, archivedAt: null },
+        data: { currentStage: previousStage, stageStatus: 'IN_PROGRESS' },
+      });
+      if (!changed.count) throw new ConflictException('وضعیت پرونده هم‌زمان تغییر کرده است؛ اطلاعات را تازه‌سازی و دوباره تلاش کنید.');
+      await tx.auditEvent.create({
+        data: {
+          driverId: id,
+          actorId: actor.id,
+          eventType: 'WORKFLOW_STAGE_REOPENED',
+          details: { fromStage: driver.currentStage, toStage: previousStage, fromStatus: driver.stageStatus, toStatus: 'IN_PROGRESS' },
+        },
+      });
       return tx.driver.findUnique({ where: { id } });
     });
   }

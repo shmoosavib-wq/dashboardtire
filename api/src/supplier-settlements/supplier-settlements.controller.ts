@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import { AuthGuard } from '../common/auth.guard';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth';
 import { Roles, RolesGuard } from '../common/roles.guard';
-import { CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
+import { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
 import { SupplierSettlementsService } from './supplier-settlements.service';
 
 @UseGuards(AuthGuard, RolesGuard)
@@ -18,6 +18,11 @@ export class SupplierSettlementsController {
     @Query('pageSize', new ParseIntPipe({ optional: true })) pageSize?: number,
   ) {
     return this.settlements.list(page, pageSize);
+  }
+
+  @Post('products')
+  addPurchaseProduct(@Body() body: AddPurchaseProductDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.settlements.addPurchaseProduct(body, actor);
   }
 
   @Post('products/:productId/settlements')

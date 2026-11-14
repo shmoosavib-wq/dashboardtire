@@ -3,11 +3,38 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
 import { dateOnly, nonEmptyText, positiveMoney } from '../drivers/workflow';
-import type { CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
+import type { AddPurchaseProductDto, CreateSupplierSettlementDto, UpdateSupplierDebtDto } from './supplier-settlements.dto';
 
 @Injectable()
 export class SupplierSettlementsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async addPurchaseProduct(input: AddPurchaseProductDto, actor: AuthenticatedUser) {
+    if (!actor.roles.includes(UserRole.SUPER_ADMIN) && !actor.roles.includes(UserRole.LEGAL_FINANCE)) {
+      throw new ForbiddenException('افزودن قلم خرید فقط برای نقش مالی مجاز است.');
+    }
+    const title = nonEmptyText(input.title, 'عنوان کالا');
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${input.driverId}::uuid FOR UPDATE`;
+      const driver = await tx.driver.findFirst({
+        where: { id: input.driverId, currentStage: 'COMPLETED', archivedAt: null },
+        select: { id: true, fullName: true },
+      });
+      if (!driver) throw new NotFoundException('پروندهٔ تکمیل‌شدهٔ انتخاب‌شده پیدا نشد.');
+      const product = await tx.driverProduct.create({
+        data: { driverId: driver.id, title, quantity: input.quantity, saleUnitPrice: BigInt(input.saleUnitPrice) },
+      });
+      await tx.auditEvent.create({
+        data: {
+          driverId: driver.id,
+          actorId: actor.id,
+          eventType: 'SUPPLIER_PURCHASE_PRODUCT_ADDED',
+          details: { productId: product.id, title, quantity: product.quantity, saleUnitPrice: String(product.saleUnitPrice), source: 'manual' },
+        },
+      });
+      return { id: product.id, title: product.title, quantity: product.quantity, saleTotal: String(BigInt(product.quantity) * BigInt(product.saleUnitPrice!)), driver };
+    });
+  }
 
   async list(page = 1, pageSize = 10) {
     const currentPage = Math.max(1, Math.floor(page || 1));

@@ -127,6 +127,19 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
     finally { setBusy(false); }
   }
 
+  async function backToPreviousStage() {
+    if (!driver) return;
+    setBusy(true); setError('');
+    try {
+      if (canEdit && !readOnlyReview && driver.currentStage !== 'COMPLETED') {
+        await api('/drivers/' + driver.id + '/draft', { method: 'PATCH', body: jsonBody({ stage: driver.currentStage, payload }) });
+      }
+      const updated = await api<Driver>('/drivers/' + driver.id + '/back', { method: 'POST' });
+      onChanged(updated.currentStage); onClose(); notify('پرونده به مرحلهٔ قبل برگشت؛ اطلاعات و مدارک قبلی حفظ شدند.');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'بازگشت به مرحلهٔ قبل انجام نشد.'); }
+    finally { setBusy(false); }
+  }
+
   async function archive(reason: string) {
     if (!driver) return;
     setBusy(true); setError('');
@@ -253,6 +266,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
       </div>
       <footer className="workflow-dialog-actions">
         <button className="btn" onClick={onClose}>{'\u0628\u0633\u062a\u0646'}</button>
+        {(stageIndex > 0 || driver.currentStage === 'COMPLETED') && !isArchived && can(user, 'SALES_OPERATIONS', 'LEGAL_FINANCE') && <button className="btn" disabled={busy} onClick={() => void backToPreviousStage()}>{busy ? 'در حال بازگشت…' : 'بازگشت به مرحلهٔ قبل'}</button>}
         {driver.currentStage !== 'COMPLETED' && <>
           {canEdit && !readOnlyReview && <button className="btn" disabled={busy} onClick={() => void saveDraft()}>{busy ? '\u0630\u062e\u06cc\u0631\u0647\u2026' : '\u0630\u062e\u06cc\u0631\u0647 \u0645\u0648\u0642\u062a'}</button>}
           <div className="workflow-primary-actions">{actionButtons(driver, user).map((item) => {

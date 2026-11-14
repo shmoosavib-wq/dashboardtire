@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsOptional, IsString, Length, Matches, Max, Min } from 'class-validator';
+import { IsDateString, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
 
 export class CreateSupplierSettlementDto {
   @IsOptional() @IsString() @Length(1, 120) storeName?: string;
@@ -9,4 +9,11 @@ export class CreateSupplierSettlementDto {
 
 export class UpdateSupplierDebtDto {
   @IsInt() @Min(1) @Max(1000000000000000) payableTotal!: number;
+}
+
+export class AddPurchaseProductDto {
+  @IsString() @Length(1, 160) title!: string;
+  @IsInt() @Min(1) @Max(1000000) quantity!: number;
+  @IsInt() @Min(1) @Max(1000000000000000) saleUnitPrice!: number;
+  @IsUUID() driverId!: string;
 }

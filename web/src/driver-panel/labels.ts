@@ -20,6 +20,7 @@ const actionNames: Record<string, string> = {
   WORKFLOW_CONFIRM_INITIAL_PAYMENT: 'پرداخت اولیه تأیید شد', WORKFLOW_RESERVE_GOODS: 'کالا رزرو شد',
   WORKFLOW_SUBMIT_CONTRACT_CHEQUE: 'قرارداد و چک برای بررسی ارسال شد', WORKFLOW_APPROVE_CONTRACT_CHEQUE: 'قرارداد و چک تأیید شد',
   WORKFLOW_COMPLETE_DELIVERY: 'تحویل و مستندات نهایی شد',
+  WORKFLOW_STAGE_REOPENED: 'پرونده به مرحلهٔ قبل برگشت',
   INSTALLMENT_PLAN_CREATED: 'برنامهٔ قسط‌ها ایجاد شد', INSTALLMENT_PAYMENT_RECORDED: 'پرداخت قسط ثبت شد', INSTALLMENT_PAYMENT_UPDATED: 'زمان پرداخت قسط اصلاح شد',
 };
 const categoryNames: Record<string, string> = {

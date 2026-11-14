@@ -3,6 +3,7 @@ import { api, asciiDigits, displayDate, faDigits, faNumber, formatMoney, jsonBod
 import LoadingIndicator from './LoadingIndicator';
 import TablePagination from './TablePagination';
 import PersianDatePicker from './driver-panel/PersianDatePicker';
+import type { Driver } from './model';
 
 type Settlement = { id: string; storeName: string; amount: string; settledAt: string; registeredAt: string; registeredBy: { name: string } };
 type SupplierProduct = {
@@ -12,6 +13,62 @@ type SupplierProduct = {
   settlements: Settlement[];
 };
 type ProductPage = { items: SupplierProduct[]; total: number; page: number; pageSize: number; totalPages: number };
+
+function AddPurchaseProductModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [driverId, setDriverId] = useState('');
+  const [title, setTitle] = useState('');
+  const [quantity, setQuantity] = useState('1');
+  const [saleUnitPrice, setSaleUnitPrice] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api<Driver[]>('/drivers?stage=COMPLETED').then((items) => {
+      setDrivers(items);
+      if (items.length) setDriverId(items[0].id);
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : 'فهرست پرونده‌ها دریافت نشد.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function submit(event: import('react').FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const numericQuantity = Number(asciiDigits(quantity).replace(/\D/g, ''));
+    const numericPrice = Number(asciiDigits(saleUnitPrice).replace(/\D/g, ''));
+    if (!driverId || !title.trim() || !Number.isSafeInteger(numericQuantity) || numericQuantity < 1 || !Number.isSafeInteger(numericPrice) || numericPrice < 1) {
+      setError('راننده، عنوان کالا، تعداد و قیمت فروش را کامل و درست وارد کنید.');
+      return;
+    }
+    setBusy(true); setError('');
+    try {
+      await api('/supplier-settlements/products', { method: 'POST', body: jsonBody({ driverId, title: title.trim(), quantity: numericQuantity, saleUnitPrice: numericPrice }) });
+      await onSaved();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'افزودن قلم خرید انجام نشد.'); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+    <section className="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="add-purchase-title">
+      <div className="modal-head"><div><div className="eyebrow">ورود قلم خرید قدیمی</div><h2 id="add-purchase-title">افزودن کالا به فهرست تسویه</h2><p>این گزینه برای پرونده‌های تکمیل‌شده‌ای است که کالایشان در مرحلهٔ پیش‌فاکتور ثبت نشده.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button></div>
+      <form onSubmit={(event) => void submit(event)}>
+        <label className="field">پروندهٔ راننده
+          <select required value={driverId} disabled={loading || busy || !drivers.length} onChange={(event) => setDriverId(event.target.value)}>
+            {!drivers.length && <option value="">{loading ? 'در حال دریافت پرونده‌ها…' : 'پروندهٔ تکمیل‌شده‌ای پیدا نشد'}</option>}
+            {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.fullName} · {faDigits(driver.mobile)}</option>)}
+          </select>
+        </label>
+        <label className="field">عنوان کالا<input required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="مثلاً لاستیک کامیون" /></label>
+        <div className="form-grid">
+          <label className="field">تعداد<input required inputMode="numeric" value={faDigits(quantity)} onChange={(event) => setQuantity(normalizeIntegerInput(event.target.value))} /></label>
+          <label className="field">قیمت فروش هر واحد (تومان)<input required inputMode="numeric" value={saleUnitPrice ? faDigits(formatMoney(saleUnitPrice)) : ''} onChange={(event) => setSaleUnitPrice(normalizeIntegerInput(event.target.value))} placeholder="مبلغ فروش به راننده" /></label>
+        </div>
+        {error && <div className="alert error" role="alert">{error}</div>}
+        <div className="modal-actions"><button type="button" className="btn" onClick={onClose} disabled={busy}>انصراف</button><button type="submit" className="btn primary" disabled={loading || busy || !drivers.length}>{busy ? 'در حال ثبت…' : 'افزودن به فهرست'}</button></div>
+      </form>
+    </section>
+  </div>;
+}
 
 function localDate() {
   const date = new Date();
@@ -87,6 +144,7 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<SupplierProduct | null>(null);
+  const [addProductOpen, setAddProductOpen] = useState(false);
   const [debtOnly, setDebtOnly] = useState(false);
   const [refresh, setRefresh] = useState(0);
 
@@ -109,10 +167,16 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
     setRefresh((value) => value + 1);
   }
 
+  async function addedProduct() {
+    setAddProductOpen(false);
+    notify('قلم خرید به فهرست تسویه اضافه شد.');
+    setRefresh((value) => value + 1);
+  }
+
   return <div className="page-stack supplier-settlements-page">
-    <div className="page-heading"><div><div className="eyebrow">حساب‌های خرید نهایی‌شده</div><h1>تسویه با تأمین‌کنندگان</h1><p>مبلغ فروش از پرونده خوانده می‌شود؛ مبلغ کل بدهی را وارد کنید و پرداخت‌های هر نوبت را از آن کم کنید.</p></div></div>
+    <div className="page-heading"><div><div className="eyebrow">حساب‌های خرید نهایی‌شده</div><h1>تسویه با تأمین‌کنندگان</h1><p>مبلغ فروش از پرونده خوانده می‌شود؛ مبلغ کل بدهی را وارد کنید و پرداخت‌های هر نوبت را از آن کم کنید.</p></div><button type="button" className="btn primary" onClick={() => setAddProductOpen(true)}>افزودن قلم خرید</button></div>
     {error && <div className="alert error" role="alert">{error}<button type="button" className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
-    {loading ? <LoadingIndicator label="در حال دریافت کالاهای تحویل‌شده…" /> : !result.items.length ? <div className="empty-state"><b>هنوز کالای تحویل‌شده‌ای برای تسویه ثبت نشده است.</b><span>پس از تکمیل و تحویل کالا، ردیف آن در این فهرست نمایش داده می‌شود.</span></div> : <>
+    {loading ? <LoadingIndicator label="در حال دریافت کالاهای تحویل‌شده…" /> : !result.items.length ? <div className="empty-state"><b>هنوز کالای تحویل‌شده‌ای برای تسویه ثبت نشده است.</b><span>از «افزودن قلم خرید» برای ثبت دستی کالای پرونده‌های قدیمی استفاده کنید.</span></div> : <>
       <div className="table-wrap supplier-settlement-table-wrap"><table className="data-table supplier-settlement-table">
         <thead><tr><th>#</th><th>کالا</th><th>راننده</th><th>مبلغ فروش</th><th>فروشگاه / تأمین‌کننده</th><th>بدهی تأمین‌کننده</th><th>پرداخت‌شده</th><th>مانده بدهی</th><th>ثبت تسویه</th></tr></thead>
         <tbody>{result.items.map((product, index) => <tr key={product.id}>
@@ -133,5 +197,6 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
       <TablePagination page={page} pageSize={pageSize} total={result.total} disabled={loading} itemLabel="قلم کالا" onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size); }} />
     </>}
     {selectedProduct && <RecordSettlementModal product={selectedProduct} debtOnly={debtOnly} onClose={() => setSelectedProduct(null)} onSaved={saved} />}
+    {addProductOpen && <AddPurchaseProductModal onClose={() => setAddProductOpen(false)} onSaved={addedProduct} />}
   </div>;
 }
