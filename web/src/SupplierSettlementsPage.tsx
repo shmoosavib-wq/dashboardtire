@@ -185,11 +185,11 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
   }
 
   return <div className="page-stack supplier-settlements-page">
-    <div className="page-heading"><div><div className="eyebrow">حساب‌های خرید نهایی‌شده</div><h1>تسویه با تأمین‌کنندگان</h1><p>مبلغ فروش از پرونده خوانده می‌شود؛ مبلغ کل بدهی را وارد کنید و پرداخت‌های هر نوبت را از آن کم کنید.</p></div><button type="button" className="btn primary" onClick={() => setAddProductOpen(true)}>افزودن قلم خرید</button></div>
+    <div className="page-heading"><div><div className="eyebrow">حساب‌های خرید نهایی‌شده</div><h1>تسویه با تأمین‌کنندگان</h1><p>در اولین ثبت پرداخت، فروشگاه و مبلغ کل بدهی را مشخص کنید؛ برای اصلاحشان از «ویرایش فروشگاه و بدهی» استفاده کنید.</p></div><button type="button" className="btn primary" onClick={() => setAddProductOpen(true)}>افزودن قلم خرید</button></div>
     {error && <div className="alert error" role="alert">{error}<button type="button" className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
     {loading ? <LoadingIndicator label="در حال دریافت کالاهای تحویل‌شده…" /> : !result.items.length ? <div className="empty-state"><b>هنوز کالای تحویل‌شده‌ای برای تسویه ثبت نشده است.</b><span>از «افزودن قلم خرید» برای ثبت دستی کالای پرونده‌های قدیمی استفاده کنید.</span></div> : <>
       <div className="table-wrap supplier-settlement-table-wrap"><table className="data-table mobile-card-table supplier-settlement-table">
-        <thead><tr><th>#</th><th>کالا</th><th>راننده</th><th>مبلغ فروش</th><th>فروشگاه / تأمین‌کننده</th><th>بدهی تأمین‌کننده</th><th>پرداخت‌شده</th><th>مانده بدهی</th><th>ثبت تسویه</th></tr></thead>
+        <thead><tr><th>#</th><th>کالا</th><th>راننده</th><th>مبلغ فروش</th><th>فروشگاه / تأمین‌کننده</th><th>بدهی تأمین‌کننده</th><th>پرداخت‌شده</th><th>اقدام</th></tr></thead>
         <tbody>{result.items.map((product, index) => <tr key={product.id}>
           <td className="row-number" data-label="ردیف">{faNumber((page - 1) * pageSize + index + 1)}</td>
           <td data-label="کالا"><b>{product.title}</b><small className="supplier-product-quantity">{faNumber(product.quantity)} عدد</small></td>
@@ -198,7 +198,6 @@ export default function SupplierSettlementsPage({ notify }: { notify: (message: 
           <td data-label="فروشگاه / تأمین‌کننده">{product.payableTotal === null ? '—' : product.settlements.at(-1)?.storeName ?? '—'}</td>
           <td data-label="بدهی تأمین‌کننده">{product.payableTotal === null ? '—' : `${formatMoney(product.payableTotal)} تومان`}</td>
           <td data-label="پرداخت‌شده">{product.payableTotal === null ? '—' : `${formatMoney(product.paidTotal)} تومان`}</td>
-          <td className={product.remaining && BigInt(product.remaining) > 0n ? 'supplier-balance-open' : ''} data-label="مانده بدهی">{product.remaining === null ? '—' : `${formatMoney(product.remaining)} تومان`}</td>
           <td data-label="اقدام"><div className="supplier-settlement-actions"><button type="button" className="btn small" onClick={() => setEditingProduct(product)}>ویرایش کالا</button><button type="button" className="btn small primary" disabled={product.remaining !== null && BigInt(product.remaining) <= 0n} onClick={() => { setDebtOnly(false); setSelectedProduct(product); }}>{product.payableTotal === null || (product.remaining !== null && BigInt(product.remaining) > 0n) ? 'ثبت پرداخت' : 'تسویه کامل'}</button>
             {product.payableTotal !== null && <button type="button" className="btn small" onClick={() => { setDebtOnly(true); setSelectedProduct(product); }}>ویرایش بدهی</button>}</div>
             {product.settlements.length > 0 && <details className="supplier-payment-history"><summary>{faNumber(product.settlements.length)} پرداخت ثبت‌شده</summary><div>{product.settlements.map((settlement) => <p key={settlement.id}><b>{settlement.storeName}</b><span>{formatMoney(settlement.amount)} تومان · {displayDate(settlement.settledAt)}</span><small>ثبت‌کننده: {settlement.registeredBy.name}</small></p>)}</div></details>}

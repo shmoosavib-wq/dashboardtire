@@ -8,6 +8,8 @@
 - `api`: API ماژولار NestJS، Prisma و PostgreSQL
 - فایل‌های بارگذاری‌شده خارج از پوشهٔ عمومی وب نگهداری می‌شوند و فقط از API احراز هویت‌شده قابل دریافت‌اند.
 
+برای تصویر کامل وضعیت ماژول‌ها، قواعد فعلی محصول و استقرار روی سرور تازه، [راهنمای تداوم پروژه](docs/project-guide.md) را ببینید.
+
 ## اجرای محلی
 
 پیش‌نیازها: Node.js 24، npm و PostgreSQL 16 یا Docker Desktop. این نسخه به ERP یا سرویس بیرونی وصل نمی‌شود.
@@ -62,7 +64,7 @@ npm run dev:web
 
 ## میزبانی بعدی
 
-برنامه برای استقرار کانتینری و PostgreSQL آماده‌سازی می‌شود. تنظیمات PaaS یا Liara هنوز انجام نشده است. مسیر ذخیره‌سازی محلی صرفاً برای توسعه است؛ پیش از استفادهٔ عملیاتی باید adapter فضای خصوصی S3، نسخهٔ پشتیبان دیتابیس/فایل و دامنهٔ HTTPS پیکربندی شود.
+نشانی production اعلام‌شده برای سامانه `https://sabadashboard.liara.run/` است. تنظیمات پایهٔ Liara در `liara.json` قرار دارد، اما build/start commandها، متغیرهای محیطی و اتصال storage باید در پنل میزبان هم تنظیم شوند. جزئیات استقرار، نیازهای دیتابیس و فضای خصوصی فایل در [راهنمای تداوم پروژه](docs/project-guide.md) آمده است. تنظیمات Render در `render.yaml` برای staging هستند و نباید بدون بازبینی به production منتقل شوند.
 # Local workflow smoke test
 
 With the local PostgreSQL, API, and web app running, execute:

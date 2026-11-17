@@ -17,6 +17,7 @@ function jalaliYearMonth(date: Date) {
   return {
     year: Number(parts.find((part) => part.type === 'year')?.value),
     month: Number(parts.find((part) => part.type === 'month')?.value),
+    day: Number(parts.find((part) => part.type === 'day')?.value),
   };
 }
 
@@ -37,12 +38,18 @@ function firstDayOfJalaliMonth(year: number, month: number): Date {
   return result;
 }
 
-function nextJalaliMonthStart(date: Date, months: number): Date {
+function nextJalaliMonthSameDay(date: Date, months: number): Date {
   const current = jalaliYearMonth(date);
   const target = current.year * 12 + current.month - 1 + months;
   const year = Math.floor(target / 12);
   const month = target % 12 + 1;
-  return firstDayOfJalaliMonth(year, month);
+  const firstDay = firstDayOfJalaliMonth(year, month);
+  const nextMonthIndex = year * 12 + month;
+  const nextYear = Math.floor(nextMonthIndex / 12);
+  const nextMonth = nextMonthIndex % 12 + 1;
+  const nextMonthStart = firstDayOfJalaliMonth(nextYear, nextMonth);
+  const monthLength = Math.round((nextMonthStart.getTime() - firstDay.getTime()) / (24 * 60 * 60 * 1000));
+  return new Date(firstDay.getTime() + (Math.min(current.day, monthLength) - 1) * 24 * 60 * 60 * 1000);
 }
 
 function buildInstallmentRows(driverId: string, paymentAmount: unknown, paymentDate: unknown, products: { quantity: number; saleUnitPrice: bigint | number | null }[]) {
@@ -60,12 +67,12 @@ function buildInstallmentRows(driverId: string, paymentAmount: unknown, paymentD
     driverId,
     number: index + 1,
     amount: baseAmount + (index === INSTALLMENT_COUNT - 1 ? remainder : 0n),
-    dueAt: nextJalaliMonthStart(firstPaymentDate, index + 1),
+    dueAt: nextJalaliMonthSameDay(firstPaymentDate, index + 1),
   }));
 }
 
 const stageFields: Record<WorkflowStage, Set<string>> = {
-  NEED_DECLARED: new Set(['intentNote']),
+  NEED_DECLARED: new Set(['intentNote', 'fullName', 'mobile', 'nationalId', 'productHint']),
   APP_VERIFICATION: new Set(['smartFleetNumber', 'ownerVerified', 'identityVerified']),
   CREDIT_REVIEW: new Set(['sababarTrips', 'transportPayments', 'lastWaybillDate', 'bankRank', 'suggestedLimit', 'approvedLimit', 'decisionNote']),
   PROFORMA_PAYMENT_RESERVATION: new Set(['products', 'invoiceNumber', 'invoiceDate', 'proformaSent', 'paymentAmount', 'paymentDate', 'paymentReference', 'paymentReceivedConfirmed', 'reservationLocation', 'reservationDate', 'reservationConfirmed']),
@@ -78,10 +85,47 @@ const stageFields: Record<WorkflowStage, Set<string>> = {
 export class DriversService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async listInstallments(actor: AuthenticatedUser) {
+    requireRole(actor, UserRole.LEGAL_FINANCE);
+    const drivers = await this.prisma.driver.findMany({
+      where: { installments: { some: {} } },
+      orderBy: { fullName: 'asc' },
+      include: {
+        products: { select: { id: true, title: true, quantity: true, saleUnitPrice: true } },
+        drafts: { where: { stage: 'PROFORMA_PAYMENT_RESERVATION' }, select: { payload: true } },
+        installments: { orderBy: { number: 'asc' }, include: { paidBy: { select: { id: true, name: true } } } },
+      },
+    });
+
+    return drivers.map(({ drafts, products, installments, ...driver }) => {
+      const payload = (drafts[0]?.payload || {}) as JsonObject;
+      return {
+        ...driver,
+        initialPaymentAmount: typeof payload.paymentAmount === 'string' || typeof payload.paymentAmount === 'number'
+          ? String(payload.paymentAmount) : null,
+        initialPaymentDate: typeof payload.paymentDate === 'string' ? payload.paymentDate : null,
+        products: products.map((product) => ({
+          id: product.id,
+          title: product.title,
+          quantity: product.quantity,
+          saleUnitPrice: product.saleUnitPrice === null ? null : String(product.saleUnitPrice),
+        })),
+        installments: installments.map((installment) => ({
+          id: installment.id,
+          number: installment.number,
+          amount: String(installment.amount),
+          dueAt: installment.dueAt,
+          paidAt: installment.paidAt,
+          paidBy: installment.paidBy,
+        })),
+      };
+    });
+  }
+
   async list(query: { search?: string; stage?: WorkflowStage; archived?: string }) {
     if (query.stage && !stages.includes(query.stage)) throw new BadRequestException('مرحله معتبر نیست.');
     const search = query.search?.trim();
-    return this.prisma.driver.findMany({
+    const drivers = await this.prisma.driver.findMany({
       where: {
         archivedAt: query.archived === 'true' ? { not: null } : null,
         currentStage: query.stage,
@@ -94,8 +138,17 @@ export class DriversService {
       orderBy: { updatedAt: 'desc' },
       include: {
         createdBy: { select: { id: true, name: true } },
+        products: { select: { title: true, quantity: true } },
+        drafts: { where: { stage: 'PROFORMA_PAYMENT_RESERVATION' }, select: { payload: true } },
         _count: { select: { documents: { where: { deletedAt: null } }, auditEvents: true } },
       },
+    });
+    return drivers.map(({ drafts, ...driver }) => {
+      const payload = drafts[0]?.payload as { products?: { title?: unknown }[] } | undefined;
+      const proformaProducts = Array.isArray(payload?.products)
+        ? payload.products.map((product) => typeof product.title === 'string' ? product.title.trim() : '').filter(Boolean)
+        : [];
+      return { ...driver, proformaProducts };
     });
   }
 
@@ -172,14 +225,31 @@ export class DriversService {
     }
     this.assertStageAccess(input.stage, actor);
     const patch = this.sanitizePayload(input.stage, input.payload);
+    const profilePatch: Record<string, string | null> = {};
+    if (input.stage === 'NEED_DECLARED') {
+      for (const key of ['fullName', 'mobile', 'nationalId', 'productHint']) {
+        if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+        const value = patch[key];
+        profilePatch[key] = typeof value === 'string' && value.trim() ? value.trim() : null;
+        delete patch[key];
+      }
+    }
     try {
       return await this.prisma.$transaction(async (tx) => {
         const current = await tx.stageDraft.findUnique({ where: { driverId_stage: { driverId: id, stage: input.stage } } });
         if (isHistoricalEdit && !current) throw new ConflictException('برای این مرحله اطلاعات ثبت‌شده‌ای پیدا نشد.');
         const previous = (current?.payload || {}) as JsonObject;
         const merged = { ...previous, ...patch };
-        const changedKeys = Object.keys(patch).filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(patch[key]));
+        const changedProfileKeys = Object.keys(profilePatch).filter((key) => {
+          const next = profilePatch[key];
+          return (driver as unknown as Record<string, unknown>)[key] !== next;
+        });
+        const changedKeys = [...Object.keys(patch).filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(patch[key])), ...changedProfileKeys];
         if (!changedKeys.length) return current;
+        if (changedProfileKeys.length) {
+          const data = Object.fromEntries(changedProfileKeys.map((key) => [key, profilePatch[key]]));
+          await tx.driver.update({ where: { id }, data });
+        }
         if (current) {
           const updated = await tx.stageDraft.updateMany({
             where: { id: current.id, version: current.version },
@@ -204,6 +274,9 @@ export class DriversService {
       }, { isolationLevel: 'Serializable' });
     } catch (error) {
       if (error instanceof ConflictException) throw error;
+      if (typeof error === 'object' && error && 'code' in error && error.code === 'P2002' && Object.keys(profilePatch).length) {
+        throw new ConflictException('شماره موبایل یا کد ملی واردشده قبلاً برای پروندهٔ دیگری ثبت شده است.');
+      }
       if (typeof error === 'object' && error && 'code' in error && (error.code === 'P2002' || error.code === 'P2034')) {
         throw new ConflictException('پیش‌نویس هم‌زمان ویرایش شده؛ اطلاعات تازه را بارگذاری و دوباره ذخیره کنید.');
       }
@@ -265,7 +338,8 @@ export class DriversService {
         requireRole(actor, UserRole.SALES_OPERATIONS);
         this.expectStage(stage, 'PROFORMA_PAYMENT_RESERVATION');
         if (!await this.hasDocument(id, DocumentCategory.PROFORMA, stage)) throw new UnprocessableEntityException('ابتدا پیش‌فاکتور همین مرحله را بارگذاری کنید.');
-        if (payload.products !== undefined) this.cleanProducts(payload.products);
+        if (!Array.isArray(payload.products) || payload.products.length === 0) throw new UnprocessableEntityException('حداقل یک کالا را با تعداد و قیمت‌های آن ثبت کنید.');
+        this.cleanProducts(payload.products);
         nonEmptyText(payload.invoiceDate, 'تاریخ پیش‌فاکتور');
         nextStatus = 'AWAITING_INITIAL_PAYMENT';
         break;
@@ -346,7 +420,7 @@ export class DriversService {
         create: { driverId: id, stage, payload: payload as object, version: 1, updatedById: actor.id },
         update: { payload: payload as object, version: { increment: 1 }, updatedById: actor.id },
       });
-      if (action === 'SUBMIT_PROFORMA' && payload.products !== undefined) {
+      if (action === 'SUBMIT_PROFORMA') {
         const products = this.cleanProducts(payload.products);
         const existingProducts = await tx.driverProduct.count({ where: { driverId: id } });
         if (existingProducts === 0) await tx.driverProduct.createMany({
@@ -358,6 +432,7 @@ export class DriversService {
             supplyUnitCost: BigInt(product.supplyUnitCost),
           })),
         });
+        await tx.driver.update({ where: { id }, data: { productHint: products.map((product) => product.title).join('، ').slice(0, 160) } });
       }
       if (action === 'CONFIRM_INITIAL_PAYMENT') {
         const products = Array.isArray(payload.products) && payload.products.length > 0
@@ -487,7 +562,8 @@ export class DriversService {
 
   async recordInstallmentPayment(id: string, installmentId: string, input: RecordInstallmentPaymentDto, actor: AuthenticatedUser) {
     requireRole(actor, UserRole.LEGAL_FINANCE);
-    await this.getActiveDriver(id);
+    const driver = await this.prisma.driver.findUnique({ where: { id }, select: { id: true } });
+    if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
     const paidAt = dateOnly(input.paidAt, 'تاریخ پرداخت');
     const todayInTehran = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -548,6 +624,19 @@ export class DriversService {
       }
       if (typeof value === 'string' && value.length > 2000) throw new BadRequestException(`مقدار ${key} بیش از حد طولانی است.`);
       if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) throw new BadRequestException(`نوع دادهٔ ${key} معتبر نیست.`);
+      if (stage === 'NEED_DECLARED' && typeof value === 'string') {
+        const text = value.trim();
+        if (key === 'fullName' && (text.length < 2 || text.length > 120)) throw new BadRequestException('نام و نام خانوادگی باید بین ۲ تا ۱۲۰ نویسه باشد.');
+        if (key === 'mobile' && !/^09\d{9}$/.test(text)) throw new BadRequestException('شماره موبایل باید ۱۱ رقم و با ۰۹ شروع شود.');
+        if (key === 'nationalId' && text !== '' && !/^\d{10}$/.test(text)) throw new BadRequestException('کد ملی باید ۱۰ رقم باشد.');
+        if (key === 'productHint' && text.length > 160) throw new BadRequestException('عنوان کالای موردنظر حداکثر ۱۶۰ نویسه است.');
+        safe[key] = text;
+        continue;
+      }
+      if (stage === 'NEED_DECLARED' && ['fullName', 'mobile', 'nationalId', 'productHint'].includes(key)
+        && (value !== null || key === 'fullName' || key === 'mobile')) {
+        throw new BadRequestException(`مقدار فیلد ${key} معتبر نیست.`);
+      }
       if (typeof value === 'number' && (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER)) throw new BadRequestException(`عدد ${key} معتبر نیست.`);
       safe[key] = value;
     }

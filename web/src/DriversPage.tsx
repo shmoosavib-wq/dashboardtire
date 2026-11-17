@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { api, asciiDigits, displayDate, faDigits, faNumber, jsonBody } from './api';
+import { api, asciiDigits, faDigits, faNumber, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
 import LoadingIndicator from './LoadingIndicator';
 import TablePagination from './TablePagination';
@@ -34,6 +34,10 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
   const [counts, setCounts] = useState<Partial<Record<Stage, number>>>({});
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [returnTarget, setReturnTarget] = useState<Driver | null>(null);
+  const [returnBusy, setReturnBusy] = useState(false);
+  const [returnError, setReturnError] = useState('');
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
@@ -56,6 +60,37 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
     } finally { setLoading(false); }
   }
 
+  async function returnCompletedDriver() {
+    if (!returnTarget) return;
+    setReturnBusy(true);
+    setReturnError('');
+    try {
+      await api<Driver>('/drivers/' + returnTarget.id + '/back', { method: 'POST' });
+      const name = returnTarget.fullName;
+      setReturnTarget(null);
+      await load();
+      notify(`پروندهٔ ${name} به مرحلهٔ تحویل و مستندات نهایی برگشت.`);
+    } catch (reason) {
+      setReturnError(reason instanceof Error ? reason.message : 'بازگرداندن پرونده به مرحلهٔ قبل انجام نشد.');
+    } finally {
+      setReturnBusy(false);
+    }
+  }
+
+  async function restoreArchivedDriver(driver: Driver) {
+    setRestoringId(driver.id);
+    setError('');
+    try {
+      await api('/drivers/' + driver.id + '/restore', { method: 'POST' });
+      await load();
+      notify(`پروندهٔ ${driver.fullName} به گردش فروش برگشت.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'بازگردانی پرونده انجام نشد.');
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
   useEffect(() => { const timer = window.setTimeout(() => void load(), 160); return () => window.clearTimeout(timer); }, [search, selectedStage, mode, refreshToken]);
 
   const heading = mode === 'flow' ? 'پیگیری گردش فروش' : mode === 'archive' ? 'پرونده‌های آرشیوشده' : 'پرونده رانندگان';
@@ -63,6 +98,7 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
 
   const canCreate = mode !== 'archive' && can(user, 'SALES_OPERATIONS');
   const visibleStages = useMemo(() => stageList, []);
+  const selectedStageName = selectedStage === 'COMPLETED' ? 'تکمیل‌شده' : visibleStages.find((item) => item.id === selectedStage)?.compact;
   const totalPages = Math.max(1, Math.ceil(drivers.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageDrivers = drivers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -74,8 +110,9 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
         {canCreate && <button className="btn primary" onClick={() => setShowCreate(true)}><span>＋</span> متقاضی جدید</button>}
       </div>
       {mode === 'flow' && <div className="stage-tabs" role="tablist" aria-label="مراحل گردش فروش">
-        <button className={!selectedStage ? 'stage-tab active' : 'stage-tab'} onClick={() => onStageChange('')}><b>{faNumber(Object.values(counts).reduce((sum, value) => sum + (value || 0), 0))}</b><span>همه مراحل</span></button>
         {visibleStages.map((stage, index) => <button key={stage.id} className={selectedStage === stage.id ? 'stage-tab active' : 'stage-tab'} onClick={() => onStageChange(stage.id)}><b>{faNumber(counts[stage.id] || 0)}</b><span><small>{faNumber(index + 1, { minimumIntegerDigits: 2 })}</small>{stage.compact}</span></button>)}
+        <button className={selectedStage === 'COMPLETED' ? 'stage-tab active' : 'stage-tab'} onClick={() => onStageChange('COMPLETED')}><b>{faNumber(counts.COMPLETED || 0)}</b><span><small>{faNumber(visibleStages.length + 1, { minimumIntegerDigits: 2 })}</small>تکمیل‌شده</span></button>
+        <button className={!selectedStage ? 'stage-tab active' : 'stage-tab'} onClick={() => onStageChange('')}><b>{faNumber(Object.values(counts).reduce((sum, value) => sum + (value || 0), 0))}</b><span>همه مراحل</span></button>
       </div>}
       <div className="toolbar">
         <div className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جستجو با نام، موبایل یا کد ملی" aria-label="جستجوی راننده" /></div>
@@ -84,20 +121,20 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
       <div className="table-wrap">
         <table className="data-table mobile-card-table driver-table">
-          <thead><tr><th>#</th><th>راننده</th><th>کالا</th><th>مرحله فعلی</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>آخرین تغییر</th><th>اقدام</th></tr></thead>
+          <thead><tr><th>#</th><th>راننده</th><th>کد ملی</th><th>کالا</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>اقدام</th></tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={8}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
-              : drivers.length === 0 ? <tr><td colSpan={8}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${stageList.find((item) => item.id === selectedStage)?.compact}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
+            {loading ? <tr><td colSpan={7}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
+              : drivers.length === 0 ? <tr><td colSpan={7}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${selectedStageName}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
               : pageDrivers.map((driver, index) => {
-                const stage = stageList.find((item) => item.id === driver.currentStage);
                 return <tr key={driver.id} onDoubleClick={() => onOpen(driver.id)}>
-                  <td className="row-number" data-label="ردیف">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td data-label="راننده"><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.nationalId ? ' · ' + faDigits(driver.nationalId) : ''}</small></div></div></td>
-                  <td data-label="کالا">{driver.productHint || '—'}</td>
-                  <td data-label="مرحله فعلی"><span className="stage-label"><i>{driver.currentStage === 'COMPLETED' ? '✓' : faNumber(stageList.findIndex((item) => item.id === driver.currentStage) + 1, { minimumIntegerDigits: 2 })}</i>{stage?.title || 'تکمیل‌شده'}</span></td>
+                  <td className="row-number" data-label="ردیف">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td data-label="راننده"><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}</small></div></div></td>
+                  <td data-label="کد ملی">{driver.nationalId ? faDigits(driver.nationalId) : '—'}</td>
+                  <td data-label="کالا"><span className="driver-product-name">{driver.proformaProducts?.join('، ') || driver.products?.map((product) => product.title).filter(Boolean).join('، ') || driver.productHint || '—'}</span></td>
                   <td data-label="وضعیت اقدام"><span className={'status-pill ' + (driver.stageStatus === 'COMPLETED' ? 'success' : driver.stageStatus.includes('REJECTED') ? 'warning' : '')}>{statusNames[driver.stageStatus] || statusNames[driver.currentStage] || driver.stageStatus}</span></td>
                   <td className="responsible-cell" data-label="مسئول پیگیری">{responsible[driver.currentStage]}</td>
-                  <td className="muted-cell" data-label="آخرین تغییر">{displayDate(driver.updatedAt)}</td>
-                  <td data-label="اقدام"><div className="row-actions">{mode === 'flow' && <button className="btn small row-action" onClick={() => onOpen(driver.id, 'flow')}>اقدام <span>←</span></button>}<button className="btn small" onClick={() => onOpen(driver.id, 'dossier')}>مشاهده پرونده</button></div></td>
+                  <td data-label="اقدام"><div className="row-actions">{mode === 'archive' && can(user, 'SUPER_ADMIN') && <button className="btn small subtle" disabled={restoringId === driver.id} onClick={() => void restoreArchivedDriver(driver)}>{restoringId === driver.id ? 'در حال بازگردانی…' : 'بازگردانی به گردش'}</button>}{mode === 'flow' && (driver.currentStage === 'COMPLETED'
+                    ? can(user, 'SALES_OPERATIONS', 'LEGAL_FINANCE') && <button className="btn small subtle" disabled={returnBusy} onClick={() => { setReturnError(''); setReturnTarget(driver); }}>بازگشت <span>↶</span></button>
+                    : <button className="btn small row-action" onClick={() => onOpen(driver.id, 'flow')}>اقدام <span>←</span></button>)}<button className="btn small" onClick={() => onOpen(driver.id, 'dossier')}>مشاهده پرونده</button></div></td>
                 </tr>;
               })}
           </tbody>
@@ -105,6 +142,11 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       </div>
       {!loading && drivers.length > 0 && <TablePagination page={currentPage} pageSize={pageSize} total={drivers.length} itemLabel="راننده" onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} />}
       {showCreate && <CreateDriverModal onClose={() => setShowCreate(false)} onSaved={() => { setShowCreate(false); void load(); notify('پرونده متقاضی ثبت شد.'); }} />}
+      {returnTarget && <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !returnBusy && setReturnTarget(null)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="return-driver-title">
+        <div className="modal-head"><div><div className="eyebrow">پروندهٔ تکمیل‌شده</div><h2 id="return-driver-title">بازگشت به مرحلهٔ قبل؟</h2><p>{returnTarget.fullName} از فهرست تکمیل‌شده خارج و به مرحلهٔ «تحویل و مستندات نهایی» برمی‌گردد. اطلاعات و مدارک قبلی حفظ می‌شوند.</p></div><button type="button" className="icon-button" disabled={returnBusy} onClick={() => setReturnTarget(null)} aria-label="بستن">×</button></div>
+        {returnError && <div className="alert error" role="alert">{returnError}</div>}
+        <div className="modal-actions"><button type="button" className="btn" disabled={returnBusy} onClick={() => setReturnTarget(null)}>انصراف</button><button type="button" className="btn primary" disabled={returnBusy} onClick={() => void returnCompletedDriver()}>{returnBusy ? 'در حال بازگشت…' : 'بازگشت به مرحلهٔ قبل'}</button></div>
+      </section></div>}
     </div>
   );
 }

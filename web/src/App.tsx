@@ -7,9 +7,10 @@ import DriversPage from './DriversPage';
 import LoadingIndicator from './LoadingIndicator';
 import UsersPage from './UsersPage';
 import SupplierSettlementsPage from './SupplierSettlementsPage';
+import DriverInstallmentsPage from './DriverInstallmentsPage';
 import { can, roleNames, type Stage, type User } from './model';
 
-type Section = 'flow' | 'drivers' | 'users' | 'archive' | 'audit' | 'supplier-settlements';
+type Section = 'flow' | 'drivers' | 'users' | 'archive' | 'audit' | 'supplier-settlements' | 'installments';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -18,7 +19,7 @@ export default function App() {
   const [section, setSection] = useState<Section>('flow');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState<'flow' | 'dossier'>('flow');
-  const [flowStage, setFlowStage] = useState<Stage | ''>('');
+  const [flowStage, setFlowStage] = useState<Stage | ''>('NEED_DECLARED');
   const [driversRefresh, setDriversRefresh] = useState(0);
   const [notice, setNotice] = useState('');
   const [bootError, setBootError] = useState('');
@@ -58,16 +59,17 @@ export default function App() {
 
   const isAdmin = can(user, 'SUPER_ADMIN');
   const viewingDossier = Boolean(selectedId && panelMode === 'dossier');
-  const title = viewingDossier ? 'پرونده راننده' : section === 'flow' ? 'گردش فروش' : section === 'drivers' ? 'پرونده رانندگان' : section === 'users' ? 'مدیریت کاربران' : section === 'audit' ? 'گزارش رویدادها' : section === 'supplier-settlements' ? 'تسویه با تأمین‌کنندگان' : 'آرشیو پرونده‌ها';
+  const title = viewingDossier ? 'پرونده راننده' : section === 'flow' ? 'گردش فروش' : section === 'drivers' ? 'پرونده رانندگان' : section === 'users' ? 'مدیریت کاربران' : section === 'audit' ? 'گزارش رویدادها' : section === 'supplier-settlements' ? 'تسویه با تأمین‌کنندگان' : section === 'installments' ? 'اقساط رانندگان' : 'آرشیو پرونده‌ها';
   return (
     <div className="app-frame">
       <aside className="sidebar">
         <div className="brand"><img src="/sababar-logo.png" alt="صبابار" /><div><strong>صبابار</strong><small>مدیریت فروش و پرونده رانندگان</small></div></div>
         <div className="nav-caption">فضای کاری</div>
         <nav>
-          <button className={section === 'flow' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('flow'); setSelectedId(null); setFlowStage(''); }}><span className="nav-icon">↗</span>گردش فروش</button>
+          <button className={section === 'flow' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('flow'); setSelectedId(null); setFlowStage('NEED_DECLARED'); }}><span className="nav-icon">↗</span>گردش فروش</button>
           <button className={section === 'drivers' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('drivers'); setSelectedId(null); }}><span className="nav-icon">♙</span>رانندگان</button>
           <button className={section === 'archive' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('archive'); setSelectedId(null); }}><span className="nav-icon">▣</span>آرشیو</button>
+          {can(user, 'LEGAL_FINANCE') && <button className={section === 'installments' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('installments'); setSelectedId(null); }}><span className="nav-icon">◷</span>اقساط رانندگان</button>}
           {can(user, 'LEGAL_FINANCE') && <button className={section === 'supplier-settlements' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('supplier-settlements'); setSelectedId(null); }}><span className="nav-icon">↔</span>تسویه با تأمین‌کنندگان</button>}
           {isAdmin && <><div className="nav-caption second">مدیریت سامانه</div><button className={section === 'users' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('users'); setSelectedId(null); }}><span className="nav-icon">♧</span>کاربران و دسترسی‌ها</button><button className={section === 'audit' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('audit'); setSelectedId(null); }}><span className="nav-icon">◷</span>گزارش رویدادها</button></>}
         </nav>
@@ -84,11 +86,12 @@ export default function App() {
             : section === 'users' && isAdmin
               ? <UsersPage notify={flash} />
               : section === 'audit' && isAdmin ? <AuditPage />
+              : section === 'installments' && can(user, 'LEGAL_FINANCE') ? <DriverInstallmentsPage notify={flash} />
               : section === 'supplier-settlements' && can(user, 'LEGAL_FINANCE') ? <SupplierSettlementsPage notify={flash} />
               : <DriversPage refreshToken={driversRefresh} mode={section === 'archive' ? 'archive' : section === 'drivers' ? 'drivers' : 'flow'} user={user} notify={flash} selectedStage={flowStage} onStageChange={setFlowStage} onOpen={(id, view) => { setPanelMode(view || (section === 'flow' ? 'flow' : 'dossier')); setSelectedId(id); }} />}
         </section>
       </main>
-      {selectedId && panelMode === 'flow' && <DriverPanel driverId={selectedId} viewMode={panelMode} user={user} notify={flash} onClose={() => setSelectedId(null)} onChanged={(stage) => { setDriversRefresh((version) => version + 1); if (stage && panelMode === 'flow') setFlowStage(stage === 'COMPLETED' ? '' : stage); }} />}
+      {selectedId && panelMode === 'flow' && <DriverPanel driverId={selectedId} viewMode={panelMode} user={user} notify={flash} onClose={() => setSelectedId(null)} onChanged={(stage) => { setDriversRefresh((version) => version + 1); if (stage && panelMode === 'flow') setFlowStage(stage); }} />}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
   );

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, displayDateTime, faNumber } from '../api';
+import { api, faNumber } from '../api';
 import { can, type Document, type Driver, type User } from '../model';
 import { categoryNames } from './labels';
 
@@ -83,7 +83,6 @@ function AddDocumentModal({ driver, user, onClose, onUploaded, notify }: { drive
 function DocumentRow({ document, driver, canDelete, onDeleted, notify }: { document: Document; driver: Driver; canDelete: boolean; onDeleted: () => Promise<void>; notify: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const date = displayDateTime(document.uploadedAt);
   const downloadUrl = '/api/drivers/' + driver.id + '/documents/' + document.id + '/download';
   async function remove() {
     setBusy(true);
@@ -94,7 +93,7 @@ function DocumentRow({ document, driver, canDelete, onDeleted, notify }: { docum
     finally { setBusy(false); }
   }
   return <>
-    <div className="document-row"><span className="file-type">{document.mimeType === 'application/pdf' ? 'PDF' : document.mimeType.startsWith('video') ? 'MP4' : 'IMG'}</span><div className="document-main"><b>{document.customTitle || document.originalName}</b><small>{document.originalName} · {(document.sizeBytes / 1024 / 1024).toFixed(1)} مگابایت · {document.uploadedBy?.name || 'کاربر'} · {date}</small></div><a className="btn small" href={downloadUrl}>دانلود</a>{canDelete && <button className="btn small danger-ghost" type="button" onClick={() => setShowDeleteConfirm(true)}>حذف</button>}</div>
+    <div className="document-row"><span className="file-type">{document.mimeType === 'application/pdf' ? 'PDF' : document.mimeType.startsWith('video') ? 'MP4' : 'IMG'}</span><div className="document-main"><b>{document.customTitle || document.originalName}</b><small>{document.originalName} · {(document.sizeBytes / 1024 / 1024).toFixed(1)} مگابایت</small></div><a className="btn small" href={downloadUrl}>دانلود</a>{canDelete && <button className="btn small danger-ghost" type="button" onClick={() => setShowDeleteConfirm(true)}>حذف</button>}</div>
     {showDeleteConfirm && <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && setShowDeleteConfirm(false)}><section className="modal compact-modal" role="alertdialog" aria-modal="true" aria-labelledby={'delete-document-' + document.id}>
       <div className="modal-head"><div><div className="eyebrow">حذف از پرونده</div><h2 id={'delete-document-' + document.id}>مدرک حذف شود؟</h2><p>«{document.customTitle || document.originalName}» از فهرست مدارک و دسترسی دانلود خارج می‌شود. رویداد حذف در تاریخچه باقی می‌ماند.</p></div><button type="button" className="icon-button" onClick={() => setShowDeleteConfirm(false)} disabled={busy} aria-label="بستن">×</button></div>
       <div className="modal-actions"><button type="button" className="btn" onClick={() => setShowDeleteConfirm(false)} disabled={busy}>انصراف</button><button type="button" className="btn danger" onClick={() => void remove()} disabled={busy}>{busy ? 'در حال حذف…' : 'حذف مدرک'}</button></div>

@@ -18,6 +18,9 @@ export class DriversController {
   @Get('stage-counts')
   stageCounts() { return this.drivers.stageCounts(); }
 
+  @Get('installments')
+  installments(@CurrentUser() actor: AuthenticatedUser) { return this.drivers.listInstallments(actor); }
+
   @Get()
   list(@Query('search') search?: string, @Query('stage') stage?: WorkflowStage, @Query('archived') archived?: string) {
     return this.drivers.list({ search, stage, archived });

@@ -202,7 +202,7 @@ try {
 
   const pdf = Buffer.from('%PDF-1.4\n%smoke-test\n%%EOF\n');
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/s7sAAAAASUVORK5CYII=', 'base64');
-  await check('proforma requires a document but does not require a product entry', async () => {
+  await check('proforma requires a valid document and complete product entry', async () => {
     await saveDraft(salesSession, 'PROFORMA_PAYMENT_RESERVATION', { invoiceNumber: 'SMOKE-001', invoiceDate: '1405/08/16' });
     await action(salesSession, 'SUBMIT_PROFORMA', undefined, [422]);
     const forgedPdf = Buffer.from('<html>not a PDF</html>');
@@ -210,12 +210,15 @@ try {
     const uploadedPdf = await upload(salesSession, 'PROFORMA', 'PROFORMA_PAYMENT_RESERVATION', 'smoke-invoice.pdf', 'application/octet-stream', pdf);
     assert.equal(uploadedPdf.data.category, 'PROFORMA');
     assert.equal(uploadedPdf.data.mimeType, 'application/pdf');
-    const uploadedImage = await upload(salesSession, 'PROFORMA', 'PROFORMA_PAYMENT_RESERVATION', 'smoke-invoice.png', 'image/png', png);
-    assert.equal(uploadedImage.data.mimeType, 'image/png');
+    await upload(salesSession, 'PROFORMA', 'PROFORMA_PAYMENT_RESERVATION', 'smoke-invoice.png', 'image/png', png, { expected: [409] });
+    await saveDraft(salesSession, 'PROFORMA_PAYMENT_RESERVATION', {
+      products: [{ title: 'Smoke tire', quantity: 2, saleUnitPrice: '5000000', supplyUnitCost: '4000000' }],
+    });
     await action(salesSession, 'SUBMIT_PROFORMA');
     const driver = await currentDriver(salesSession);
     assert.equal(driver.stageStatus, 'AWAITING_INITIAL_PAYMENT');
-    assert.equal(driver.products.length, 0);
+    assert.equal(driver.products.length, 1);
+    assert.equal(driver.products[0].title, 'Smoke tire');
   });
 
   await check('initial payment saves in pieces and requires finance confirmation', async () => {
@@ -256,11 +259,11 @@ try {
   });
 
   const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 20]), Buffer.from('ftypisom'), Buffer.from([0, 0, 0, 0, 0, 0, 0, 0])]);
-  await check('delivery requires all checks and satisfaction video before completion', async () => {
+  await check('delivery requires all physical handoff checks and records the satisfaction video', async () => {
     await saveDraft(salesSession, 'DELIVERY_FINAL_DOCS', { deliveryDate: '1405/08/16', deliveryLocation: 'Smoke yard', recipient: 'Smoke recipient' });
     await upload(salesSession, 'SATISFACTION_VIDEO', 'DELIVERY_FINAL_DOCS', 'smoke-satisfaction.mp4', 'video/mp4', mp4);
     await action(salesSession, 'COMPLETE_DELIVERY', undefined, [422]);
-    await saveDraft(salesSession, 'DELIVERY_FINAL_DOCS', { contractPhysical: true, chequePhysical: true, goodsDelivered: true, satisfactionVideoReceived: true });
+    await saveDraft(salesSession, 'DELIVERY_FINAL_DOCS', { contractPhysical: true, chequePhysical: true, goodsDelivered: true });
     await action(salesSession, 'COMPLETE_DELIVERY');
     const completed = await currentDriver(salesSession);
     assert.equal(completed.currentStage, 'COMPLETED');

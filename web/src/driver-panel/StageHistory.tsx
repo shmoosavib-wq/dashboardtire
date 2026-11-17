@@ -49,11 +49,9 @@ function StageHistory({ driver, user, onEdit }: {
         const products = stage.id === 'PROFORMA_PAYMENT_RESERVATION' && Array.isArray(draft.payload.products)
           ? draft.payload.products as Record<string, unknown>[]
           : [];
-        const wasCorrected = driver.auditEvents?.some((event) => event.eventType === 'STAGE_DRAFT_CORRECTED' && event.details.stage === stage.id);
         const roles = editRoles[stage.id] || [];
         return <article className="stage-history-row" key={stage.id}>
           <header><div className="stage-history-title"><span className="stage-history-check">✓</span><div><strong>{stage.title}</strong><small>{draft.updatedBy?.name || 'کاربر سامانه'} · {displayDateTime(draft.updatedAt)}</small></div></div>
-            {wasCorrected && <span className="status-pill corrected">اصلاح‌شده</span>}
             {!driver.archivedAt && can(user, ...roles) && <button className="btn small subtle" onClick={() => onEdit(stage.id)}>ویرایش اطلاعات</button>}
           </header>
           {fields.length ? <dl>{fields.map((field) => <div key={field.name}><dt>{field.label}</dt><dd>{valueLabel(field.kind, draft.payload[field.name])}</dd></div>)}</dl> : <p className="stage-history-empty">اطلاعاتی برای این مرحله ثبت نشده است.</p>}

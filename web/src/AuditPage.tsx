@@ -61,7 +61,7 @@ export default function AuditPage() {
       <button className="btn primary" type="submit">جست‌وجو</button>
     </form>
     {error && <div className="alert error">{error}</div>}
-    <div className="table-wrap"><table className="data-table audit-table"><thead><tr><th>#</th><th>زمان</th><th>کاربر</th><th>رویداد</th><th>پرونده</th><th>جزئیات ثبت</th></tr></thead><tbody>
+    <div className="table-wrap"><table className="data-table mobile-card-table audit-table"><thead><tr><th>#</th><th>زمان</th><th>کاربر</th><th>رویداد</th><th>پرونده</th><th>جزئیات ثبت</th></tr></thead><tbody>
       {loading ? <tr><td colSpan={6}><div className="empty-state"><LoadingIndicator label="در حال دریافت رویدادها…" compact /></div></td></tr>
         : result.items.map((event, index) => <tr key={event.id}><td className="row-number">{faNumber((result.page - 1) * result.pageSize + index + 1)}</td><td>{displayDateTime(event.createdAt)}</td><td>{event.actor?.name || 'سامانه'}</td><td><span className="audit-event">{labels[event.eventType] || event.eventType.replace(/^WORKFLOW_/, 'اقدام گردش: ')}</span></td><td>{event.driver ? <div className="audit-driver"><b>{event.driver.fullName}</b><small>{event.driver.mobile}</small></div> : '—'}</td><td className="audit-details">{format(event.details)}</td></tr>)}
       {!loading && !result.items.length && <tr><td colSpan={6}><div className="empty-state">رویدادی با این مشخصات پیدا نشد.</div></td></tr>}

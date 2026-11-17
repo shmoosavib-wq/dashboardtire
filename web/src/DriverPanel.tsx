@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, displayDateTime, faDigits, faNumber, jsonBody } from './api';
+import { api, asciiDigits, displayDateTime, faDigits, faNumber, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
 import LoadingIndicator from './LoadingIndicator';
 import { statusLabel } from './driver-panel/labels';
@@ -13,6 +13,14 @@ const historicalProductFields: FieldDef[] = [
   { name: 'saleUnitPrice', label: 'قیمت فروش هر واحد', kind: 'money' },
   { name: 'supplyUnitCost', label: 'قیمت تأمین هر واحد', kind: 'money' },
 ];
+const applicantProfileFields: FieldDef[] = [
+  { name: 'fullName', label: 'نام و نام خانوادگی' },
+  { name: 'mobile', label: 'شماره موبایل' },
+  { name: 'nationalId', label: 'کد ملی' },
+  { name: 'productHint', label: 'کالای موردنظر', placeholder: 'اختیاری' },
+];
+const emptyProduct = () => ({ title: '', quantity: '1', saleUnitPrice: '', supplyUnitCost: '' });
+const positiveProductValue = (value: unknown) => Number(asciiDigits(String(value ?? '')).replace(/[٬,\s]/g, '')) > 0;
 
 function hasStageDocument(driver: Driver, category: string) {
   return driver.documents?.some((document) => document.category === category && (document.stage === driver.currentStage || !document.stage)) || false;
@@ -47,7 +55,9 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
       if (version !== loadVersion.current) return;
       setDriver(value);
       const active = value.drafts?.find((item) => item.stage === value.currentStage);
-      setPayload(currentPayload ?? active?.payload ?? {});
+       const nextPayload = { ...(currentPayload ?? active?.payload ?? {}) };
+       if (value.currentStage === 'PROFORMA_PAYMENT_RESERVATION' && (!Array.isArray(nextPayload.products) || nextPayload.products.length === 0)) nextPayload.products = [emptyProduct()];
+       setPayload(nextPayload);
     } catch (reason) {
       if (version === loadVersion.current) setError(reason instanceof Error ? reason.message : 'پرونده دریافت نشد.');
     }
@@ -82,7 +92,12 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
     const saved = driver?.drafts?.find((item) => item.stage === stage);
     if (!saved) return;
     setEditingStage(stage);
-    setEditPayload({ ...saved.payload });
+    setEditPayload({
+      ...saved.payload,
+      ...(stage === 'NEED_DECLARED' ? {
+        fullName: driver?.fullName || '', mobile: driver?.mobile || '', nationalId: driver?.nationalId || '', productHint: driver?.productHint || '',
+      } : {}),
+    });
     setEditError('');
   }
 
@@ -100,6 +115,22 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
 
   function removeHistoricalProduct(index: number) {
     setEditPayload((previous) => ({ ...previous, products: (Array.isArray(previous.products) ? previous.products : []).filter((_, itemIndex) => itemIndex !== index) }));
+  }
+
+  function updateCurrentProduct(index: number, name: string, value: unknown) {
+    setPayload((previous) => {
+      const products = Array.isArray(previous.products) ? [...previous.products] as Record<string, unknown>[] : [];
+      products[index] = { ...(products[index] || {}), [name]: value };
+      return { ...previous, products };
+    });
+  }
+
+  function addCurrentProduct() {
+    setPayload((previous) => ({ ...previous, products: [...(Array.isArray(previous.products) ? previous.products : []), emptyProduct()] }));
+  }
+
+  function removeCurrentProduct(index: number) {
+    setPayload((previous) => ({ ...previous, products: (Array.isArray(previous.products) ? previous.products : []).filter((_, itemIndex) => itemIndex !== index) }));
   }
 
   async function savePreviousStage() {
@@ -219,7 +250,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
         <div className="workflow-dialog-body">
           <div className="review-notice"><b>اصلاح مرحلهٔ قبلی</b><span>مرحلهٔ جاری تغییر نمی‌کند. نام کاربر، زمان و فیلدهای اصلاح‌شده در تاریخچهٔ پرونده ثبت می‌شود؛ اطلاعات مراحل بعد را پس از اصلاح بازبینی کنید.</span></div>
           {editError && <div className="alert error" role="alert">{editError}</div>}
-          <div className="stage-form-grid">{stageFields[editingStage].map((field) => <Field key={field.name} field={field} value={editPayload[field.name]} disabled={editBusy} onChange={(value) => { setEditError(''); setEditPayload((old) => ({ ...old, [field.name]: value })); }} />)}</div>
+          <div className="stage-form-grid">{editingStage === 'NEED_DECLARED' && applicantProfileFields.map((field) => <Field key={field.name} field={field} value={editPayload[field.name]} disabled={editBusy} onChange={(value) => { setEditError(''); const text = String(value ?? ''); const normalized = field.name === 'mobile' || field.name === 'nationalId' ? asciiDigits(text).replace(/\D/g, '') : text; setEditPayload((old) => ({ ...old, [field.name]: normalized })); }} />)}{stageFields[editingStage].map((field) => <Field key={field.name} field={field} value={editPayload[field.name]} disabled={editBusy} onChange={(value) => { setEditError(''); setEditPayload((old) => ({ ...old, [field.name]: value })); }} />)}</div>
           {editingStage === 'PROFORMA_PAYMENT_RESERVATION' && <section className="historical-products">
             <div className="section-head"><div><h4>کالاهای ثبت‌شده</h4><p>عنوان، تعداد و قیمت هر قلم را اصلاح کنید.</p></div><button className="btn small subtle" type="button" disabled={editBusy} onClick={addHistoricalProduct}>＋ افزودن کالا</button></div>
             {(Array.isArray(editPayload.products) ? editPayload.products as Record<string, unknown>[] : []).map((product, index) => <div className="historical-product-row" key={index}>
@@ -259,6 +290,13 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
               const readOnly = !canEdit || (readOnlyReview && !editablePaymentConfirmation) || (waitingForFinance && !editablePaymentConfirmation) || (creditReview && creditEntryField) || (contractReview && !['contractChecked', 'chequeChecked', 'chequeAmount', 'chequeNumber', 'chequeDueDate'].includes(field.name));
               return <Field key={field.name} field={field} value={payload[field.name]} disabled={readOnly} onChange={(value) => { setError(''); setPayload((old) => ({ ...old, [field.name]: value })); }} />;
             })}</div>
+            {driver.currentStage === 'PROFORMA_PAYMENT_RESERVATION' && <section className="historical-products current-products">
+              <div className="section-head"><div><h4>کالاهای پیش‌فاکتور</h4><p>عنوان، تعداد و قیمت هر قلم را وارد کنید؛ ثبت پیش‌فاکتور بدون کالا انجام نمی‌شود.</p></div>{can(user, 'SALES_OPERATIONS') && <button className="btn small subtle" type="button" disabled={busy || isArchived || financeReview || driver.stageStatus !== 'IN_PROGRESS'} onClick={addCurrentProduct}>＋ افزودن کالا</button>}</div>
+              {(Array.isArray(payload.products) ? payload.products as Record<string, unknown>[] : []).map((product, index) => <div className="historical-product-row" key={index}>
+                {historicalProductFields.map((field) => <Field key={field.name} field={field} value={product[field.name]} disabled={!can(user, 'SALES_OPERATIONS') || busy || isArchived || financeReview || driver.stageStatus !== 'IN_PROGRESS'} onChange={(value) => updateCurrentProduct(index, field.name, value)} />)}
+                {can(user, 'SALES_OPERATIONS') && <button className="btn small danger-ghost" type="button" disabled={busy || isArchived || financeReview || driver.stageStatus !== 'IN_PROGRESS'} onClick={() => removeCurrentProduct(index)}>حذف</button>}
+              </div>)}
+            </section>}
             {!isArchived && fileCategories.length > 0 && <section className="stage-docs"><div className="section-head"><div><h4>{'\u0645\u062f\u0627\u0631\u06a9 \u0627\u06cc\u0646 \u0645\u0631\u062d\u0644\u0647'}</h4><p>{'\u0641\u0627\u06cc\u0644\u200c\u0647\u0627 \u0628\u0644\u0627\u0641\u0627\u0635\u0644\u0647 \u062b\u0628\u062a \u0645\u06cc\u200c\u0634\u0648\u0646\u062f \u0648 \u062f\u0631 \u067e\u0631\u0648\u0646\u062f\u0647 \u0628\u0627\u0642\u06cc \u0645\u06cc\u200c\u0645\u0627\u0646\u0646\u062f.'}</p></div></div><div className="upload-row">{fileCategories.map((category) => <UploadButton key={category} category={category} driver={driver} user={user} onUploaded={() => load({ preserveCurrentPayload: true })} notify={notify} />)}</div></section>}
             {driver.stageStatus === 'CREDIT_REJECTED' && <div className="rejected-note"><span>!</span><div><b>{'\u062f\u0631\u062e\u0648\u0627\u0633\u062a \u0627\u0639\u062a\u0628\u0627\u0631 \u0631\u062f \u0634\u062f\u0647 \u0627\u0633\u062a.'}</b><small>{String(payload.decisionNote || 'یادداشتی ثبت نشده است.')}</small></div></div>}
           </>}
@@ -270,9 +308,11 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
         {driver.currentStage !== 'COMPLETED' && <>
           {canEdit && !readOnlyReview && <button className="btn" disabled={busy} onClick={() => void saveDraft()}>{busy ? '\u0630\u062e\u06cc\u0631\u0647\u2026' : '\u0630\u062e\u06cc\u0631\u0647 \u0645\u0648\u0642\u062a'}</button>}
           <div className="workflow-primary-actions">{actionButtons(driver, user).map((item) => {
-            const confirmationMissing = (item.action === 'CONFIRM_INITIAL_PAYMENT' && payload.paymentReceivedConfirmed !== true) || (item.action === 'RESERVE_GOODS' && payload.reservationConfirmed !== true);
+            const products = Array.isArray(payload.products) ? payload.products as Record<string, unknown>[] : [];
+            const proformaProductsMissing = item.action === 'SUBMIT_PROFORMA' && (!products.length || products.some((product) => !String(product.title || '').trim() || !positiveProductValue(product.quantity) || !positiveProductValue(product.saleUnitPrice) || !positiveProductValue(product.supplyUnitCost)));
+            const confirmationMissing = (item.action === 'CONFIRM_INITIAL_PAYMENT' && payload.paymentReceivedConfirmed !== true) || (item.action === 'RESERVE_GOODS' && payload.reservationConfirmed !== true) || proformaProductsMissing;
             const documentMissing = actionMissingDocuments(driver, item.action);
-            return <button key={item.action} className={'btn ' + (item.kind || 'primary')} disabled={busy || confirmationMissing || documentMissing} title={documentMissing ? 'ابتدا مدارک لازم همین مرحله را بارگذاری کنید.' : undefined} onClick={() => void act(item.action)}>{item.label}</button>;
+            return <button key={item.action} className={'btn ' + (item.kind || 'primary')} disabled={busy || confirmationMissing || documentMissing} title={documentMissing ? 'ابتدا مدارک لازم همین مرحله را بارگذاری کنید.' : proformaProductsMissing ? 'ابتدا عنوان، تعداد و قیمت کالاهای پیش‌فاکتور را کامل کنید.' : undefined} onClick={() => void act(item.action)}>{item.label}</button>;
           })}</div>
         </>}
       </footer>
@@ -283,9 +323,11 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
 function DossierOverview({ driver }: { driver: Driver }) {
   const currentStage = stageList.find((stage) => stage.id === driver.currentStage);
   const draft = driver.drafts?.find((item) => item.stage === 'PROFORMA_PAYMENT_RESERVATION')?.payload || {};
+  const proformaProducts = Array.isArray(draft.products) ? draft.products as Record<string, unknown>[] : [];
+  const proformaSummary = proformaProducts.map((item) => `${String(item.title || 'کالا')} · ${faNumber(String(item.quantity ?? ''))} عدد`).join('، ');
   return <div className="dossier-overview">
     <section className="dossier-status"><div><small>وضعیت فعلی پرونده</small><strong>{currentStage?.title || 'فرایند تکمیل شده'}</strong></div><span className="status-pill">{statusLabel[driver.stageStatus] || statusLabel[driver.currentStage]}</span></section>
-    <section className="dossier-section"><h3>مشخصات راننده</h3><div className="dossier-facts"><div><small>نام و نام خانوادگی</small><b>{driver.fullName}</b></div><div><small>شماره موبایل</small><b>{faDigits(driver.mobile)}</b></div><div><small>کد ملی</small><b>{driver.nationalId ? faDigits(driver.nationalId) : 'ثبت نشده'}</b></div><div><small>تاریخ ایجاد پرونده</small><b>{displayDateTime(driver.createdAt)}</b></div><div className="wide"><small>کالای موردنظر / خریداری‌شده</small><b>{driver.products?.map((item) => `${item.title} · ${faNumber(item.quantity)} عدد`).join('، ') || driver.productHint || 'هنوز ثبت نشده'}</b></div></div></section>
+    <section className="dossier-section"><h3>مشخصات راننده</h3><div className="dossier-facts"><div><small>نام و نام خانوادگی</small><b>{driver.fullName}</b></div><div><small>شماره موبایل</small><b>{faDigits(driver.mobile)}</b></div><div><small>کد ملی</small><b>{driver.nationalId ? faDigits(driver.nationalId) : 'ثبت نشده'}</b></div><div><small>تاریخ ایجاد پرونده</small><b>{displayDateTime(driver.createdAt)}</b></div><div className="wide"><small>کالای موردنظر / خریداری‌شده</small><b>{proformaSummary || driver.products?.map((item) => `${item.title} · ${faNumber(item.quantity)} عدد`).join('، ') || driver.productHint || 'هنوز ثبت نشده'}</b></div></div></section>
     <section className="dossier-section dossier-records"><div><span>مدارک پرونده</span><b>{faNumber(driver.documents?.length || 0)}</b></div><div><span>رویدادهای ثبت‌شده</span><b>{faNumber(driver.auditEvents?.length || 0)}</b></div><div><span>قلم کالای ثبت‌شده</span><b>{faNumber(driver.products?.length || 0)}</b></div></section>
     {Object.keys(draft).length > 0 && <section className="dossier-section"><h3>خلاصهٔ خرید</h3><PurchaseSummaryForDossier driver={driver} /></section>}
   </div>;

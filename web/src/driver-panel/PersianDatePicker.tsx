@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { asciiDigits, faDigits, faNumber, fromPersianDate, toPersianDate } from '../api';
 
@@ -25,7 +25,7 @@ export default function PersianDatePicker({ value, onChange, disabled = false }:
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const initial = jalaliParts(toPersianDate(value) || value);
   const [view, setView] = useState(() => initial || currentJalaliMonth());
 
@@ -33,16 +33,20 @@ export default function PersianDatePicker({ value, onChange, disabled = false }:
     if (initial) setView(initial);
   }, [value]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
       const rect = trigger.current?.getBoundingClientRect();
-      if (!rect) return;
-      const width = 286;
-      const height = 326;
+      const anchor = trigger.current?.parentElement?.getBoundingClientRect() || rect;
+      const bounds = popup.current?.getBoundingClientRect();
+      if (!rect || !anchor || !bounds) return;
+      const width = bounds.width;
+      const height = bounds.height;
+      const below = window.innerHeight - rect.bottom - 8;
+      const above = rect.top - 8;
       setPosition({
-        left: Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8)),
-        top: rect.bottom + height + 8 > window.innerHeight ? Math.max(8, rect.top - height - 6) : rect.bottom + 6,
+        left: Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8)),
+        top: below >= height || below >= above ? Math.min(rect.bottom + 6, window.innerHeight - height - 8) : Math.max(8, rect.top - height - 6),
       });
     };
     const outside = (event: PointerEvent) => {
@@ -60,7 +64,7 @@ export default function PersianDatePicker({ value, onChange, disabled = false }:
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', escape);
     };
-  }, [open]);
+  }, [open, view.year, view.month]);
 
   function moveMonth(delta: number) {
     const cursor = new Date(Date.UTC(view.year, view.month - 1 + delta, 1));
@@ -77,9 +81,9 @@ export default function PersianDatePicker({ value, onChange, disabled = false }:
   return <>
     <div className="persian-date-control">
       <input value={value ? faDigits(toPersianDate(value) || value) : ''} readOnly disabled={disabled} placeholder="انتخاب تاریخ شمسی" aria-label="تاریخ شمسی" />
-      <button ref={trigger} type="button" className="date-picker-trigger" disabled={disabled} aria-label="بازکردن تقویم شمسی" aria-expanded={open} onClick={() => setOpen((state) => !state)}>▦</button>
+      <button ref={trigger} type="button" className="date-picker-trigger" disabled={disabled} aria-label="بازکردن تقویم شمسی" aria-expanded={open} onClick={() => { setPosition(null); setOpen((state) => !state); }}>▦</button>
     </div>
-    {open && createPortal(<div ref={popup} className="persian-calendar" role="dialog" aria-label="تقویم شمسی" style={{ top: position.top, left: position.left }}>
+    {open && createPortal(<div ref={popup} className="persian-calendar" role="dialog" aria-label="تقویم شمسی" style={{ top: position?.top ?? 0, left: position?.left ?? 0, visibility: position ? 'visible' : 'hidden' }}>
       <div className="persian-calendar-head"><button type="button" aria-label="ماه قبل" onClick={() => moveMonth(-1)}>›</button><strong>{monthNames[view.month - 1]} {faNumber(view.year)}</strong><button type="button" aria-label="ماه بعد" onClick={() => moveMonth(1)}>‹</button></div>
       <div className="persian-calendar-grid">{weekDays.map((day) => <span className="persian-weekday" key={day}>{day}</span>)}{cells.map((day, index) => day === null ? <span key={`empty-${index}`} /> : <button key={day} type="button" className={today?.year === view.year && today.month === view.month && today.day === day ? 'today' : ''} onClick={() => { const iso = fromPersianDate(`${view.year}/${String(view.month).padStart(2, '0')}/${String(day).padStart(2, '0')}`); if (iso) onChange(iso); setOpen(false); }}>{faDigits(String(day))}</button>)}</div>
     </div>, document.body)}
