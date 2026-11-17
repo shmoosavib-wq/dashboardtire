@@ -97,7 +97,7 @@ function Chart({ data, metric, granularity, onSelect }: {
   const tickIndexes = Array.from(new Set([0, Math.floor((data.length - 1) / 3), Math.floor((data.length - 1) * 2 / 3), data.length - 1]));
 
   return <div className="dash-chart-wrap">
-    <svg className="dash-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`نمودار ${metric === 'salesCount' ? 'تعداد فروش' : moneyMetricNames[metric]} در بازهٔ انتخاب‌شده`} preserveAspectRatio="none">
+    <svg className="dash-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`نمودار ${metric === 'salesCount' ? 'جفت لاستیک فروخته‌شده' : moneyMetricNames[metric]} در بازهٔ انتخاب‌شده`} preserveAspectRatio="none">
       {[0, 1, 2, 3].map((lineIndex) => {
         const lineY = top + (height - top - bottom) * lineIndex / 3;
         const value = Math.round(max * (3 - lineIndex) / 3);
@@ -109,10 +109,10 @@ function Chart({ data, metric, granularity, onSelect }: {
         return <rect key={point.key} x={point.x - barWidth / 2} y={point.y} width={barWidth} height={point.barHeight}
         rx={Math.min(7, barWidth / 2)} className={`dash-chart-bar ${metric} ${index === data.length - 1 ? 'current' : ''}`}
         style={{ animationDelay: `${Math.min(index, 30) * 8 + 100}ms` }} tabIndex={0} role="button"
-        aria-label={`${localizeKey(point.labelKey, granularity, true)}، ${metric === 'salesCount' ? faNumber(point.value) + ' فروش' : shortMoney(point.value) + ' تومان'}`}
+        aria-label={`${localizeKey(point.labelKey, granularity, true)}، ${metric === 'salesCount' ? faNumber(point.value) + ' جفت' : shortMoney(point.value) + ' تومان'}`}
         onMouseEnter={() => onSelect(index)} onMouseLeave={() => onSelect(null)} onFocus={() => onSelect(index)} onBlur={() => onSelect(null)} onClick={() => onSelect(index)}
         onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(index); } }}>
-        <title>{localizeKey(point.labelKey, granularity, true)} · {metric === 'salesCount' ? `${faNumber(point.value)} فروش` : `${formatMoney(String(point.value))} تومان`}</title>
+        <title>{localizeKey(point.labelKey, granularity, true)} · {metric === 'salesCount' ? `${faNumber(point.value)} جفت` : `${formatMoney(String(point.value))} تومان`}</title>
       </rect>;
       })}
       {tickIndexes.map((index) => <text key={index} x={points[index]?.x ?? 0} y={height - 7} textAnchor="middle" className="dash-axis-label">{localizeKey(data[index]?.labelKey || '', granularity, true)}</text>)}
@@ -154,7 +154,7 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
 
   const kpis = [
     { label: 'پرونده‌های فعال', value: data ? faNumber(data.activeCases) : '—', helper: 'وضعیت همین لحظه', kind: 'cases', glyph: '▣' },
-    { label: 'فروش ثبت‌شده', value: data ? faNumber(data.totals.salesCount) : '—', helper: periodLabels[period], kind: 'sales', glyph: '↗' },
+    { label: 'جفت لاستیک فروخته‌شده', value: data ? faNumber(data.totals.salesCount) : '—', helper: periodLabels[period], kind: 'sales', glyph: '↗' },
     ...(data?.hasFinancialAccess ? [
       { label: 'ارزش فروش', value: data.totals.salesAmount === null ? '—' : formatMoney(data.totals.salesAmount), helper: `تومان · ${periodLabels[period]}`, kind: 'gross', glyph: '◉' },
       { label: 'مبلغ وصول‌شده', value: data.totals.receivedAmount === null ? '—' : formatMoney(data.totals.receivedAmount), helper: `تومان · ${periodLabels[period]}`, kind: 'received', glyph: '✓' },
@@ -202,14 +202,14 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
         </div>
       </div>
       <div className="dash-metric-row" role="tablist" aria-label="شاخص نمودار">
-        <button type="button" role="tab" aria-selected={activeMetric === 'salesCount'} className={activeMetric === 'salesCount' ? 'active' : ''} onClick={() => { setSelectedPoint(null); setMetric('salesCount'); }}><i className="sales-dot" />تعداد فروش</button>
+        <button type="button" role="tab" aria-selected={activeMetric === 'salesCount'} className={activeMetric === 'salesCount' ? 'active' : ''} onClick={() => { setSelectedPoint(null); setMetric('salesCount'); }}><i className="sales-dot" />جفت لاستیک فروخته‌شده</button>
         {data?.hasFinancialAccess && (Object.entries(moneyMetricNames) as [Exclude<Metric, 'salesCount'>, string][]).map(([value, label]) => <button type="button" role="tab" aria-selected={activeMetric === value} className={activeMetric === value ? 'active' : ''} key={value} onClick={() => { setSelectedPoint(null); setMetric(value); }}><i className={`metric-dot ${value}`} />{label}</button>)}
       </div>
       {!data && loading ? <div className="dash-chart-loading"><LoadingIndicator label="در حال دریافت روندها…" compact /></div>
         : <>
-          <div className="dash-chart-summary"><div><small>{selected ? localizeKey(selected.labelKey, granularity, true) : moneyMetricNames[activeMetric as Exclude<Metric, 'salesCount'>] || 'تعداد فروش'}</small><strong>{selected
-            ? activeMetric === 'salesCount' ? faNumber(selected.salesCount) : `${formatMoney(selected[activeMetric])} تومان`
-            : activeMetric === 'salesCount' ? `${faNumber(chartTotal)} فروش` : `${formatMoney(chartTotal)} تومان`}</strong></div><span>{selected ? 'مقدار در این نقطه' : 'جمع بازهٔ نمودار'}</span></div>
+          <div className="dash-chart-summary"><div><small>{selected ? localizeKey(selected.labelKey, granularity, true) : moneyMetricNames[activeMetric as Exclude<Metric, 'salesCount'>] || 'جفت لاستیک فروخته‌شده'}</small><strong>{selected
+            ? activeMetric === 'salesCount' ? `${faNumber(selected.salesCount)} جفت` : `${formatMoney(selected[activeMetric])} تومان`
+            : activeMetric === 'salesCount' ? `${faNumber(chartTotal)} جفت` : `${formatMoney(chartTotal)} تومان`}</strong></div><span>{selected ? 'مقدار در این نقطه' : 'جمع بازهٔ نمودار'}</span></div>
           <Chart key={`${period}-${granularity}-${activeMetric}`} data={data?.series || []} metric={activeMetric} granularity={granularity} onSelect={setSelectedPoint} />
           {!data?.hasFinancialAccess && <p className="dash-access-note">مبالغ فروش و وصول برای نقش حقوقی و مالی و مدیر سامانه نمایش داده می‌شوند.</p>}
         </>}

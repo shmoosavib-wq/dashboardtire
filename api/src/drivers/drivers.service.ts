@@ -8,6 +8,12 @@ import { dateOnly, nonEmptyText, nonNegativeInteger, positiveMoney, requireRole,
 type JsonObject = Record<string, unknown>;
 const INSTALLMENT_COUNT = 3;
 
+function isAfterInitialPayment(stage: WorkflowStage): boolean {
+  return stage === WorkflowStage.CONTRACT_CHEQUE
+    || stage === WorkflowStage.DELIVERY_FINAL_DOCS
+    || stage === WorkflowStage.COMPLETED;
+}
+
 const jalaliCalendar = new Intl.DateTimeFormat('en-u-ca-persian-nu-latn', {
   year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC',
 });
@@ -92,6 +98,7 @@ export class DriversService {
         OR: [
           { installments: { some: {} } },
           { auditEvents: { some: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' } } },
+          { currentStage: { in: [WorkflowStage.CONTRACT_CHEQUE, WorkflowStage.DELIVERY_FINAL_DOCS, WorkflowStage.COMPLETED] } },
         ],
       },
       orderBy: { fullName: 'asc' },
@@ -118,19 +125,20 @@ export class DriversService {
         const row = product as Record<string, unknown>;
         const quantity = Number(row.quantity);
         const priceText = String(row.saleUnitPrice ?? '');
-        if (!Number.isSafeInteger(quantity) || quantity <= 0 || !/^\\d+$/.test(priceText)) {
+        if (!Number.isSafeInteger(quantity) || quantity <= 0 || !/^\d+$/.test(priceText)) {
           validProducts = false;
           break;
         }
         saleTotal += BigInt(quantity) * BigInt(priceText);
       }
-      const paymentDayIsValid = /^\\d{4}-\\d{2}-\\d{2}$/.test(paymentDate)
+      const paymentDayIsValid = /^\d{4}-\d{2}-\d{2}$/.test(paymentDate)
         && !Number.isNaN(Date.parse(`${paymentDate}T00:00:00.000Z`))
         && new Date(`${paymentDate}T00:00:00.000Z`).toISOString().slice(0, 10) === paymentDate;
-      const remaining = /^\\d+$/.test(paymentAmount) && BigInt(paymentAmount) <= saleTotal
+      const remaining = /^\d+$/.test(paymentAmount) && BigInt(paymentAmount) <= saleTotal
         ? saleTotal - BigInt(paymentAmount) : 0n;
+      const paymentWasConfirmed = auditEvents.length > 0 || isAfterInitialPayment(driver.currentStage);
       const needsPlan = installments.length === 0
-        && auditEvents.length > 0
+        && paymentWasConfirmed
         && payload.paymentReceivedConfirmed === true
         && paymentDayIsValid
         && validProducts
@@ -543,7 +551,7 @@ export class DriversService {
 
   async createInstallmentPlan(id: string, actor: AuthenticatedUser) {
     requireRole(actor, UserRole.LEGAL_FINANCE);
-    const driver = await this.prisma.driver.findUnique({ where: { id }, select: { id: true } });
+    const driver = await this.prisma.driver.findUnique({ where: { id }, select: { id: true, currentStage: true } });
     if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
     return this.prisma.$transaction(async (tx) => {
       const existingCount = await tx.driverInstallment.count({ where: { driverId: id } });
@@ -552,7 +560,8 @@ export class DriversService {
       const payload = (draft?.payload || {}) as JsonObject;
       if (payload.paymentReceivedConfirmed !== true) throw new ConflictException('پرداخت اولیه باید توسط مالی تأیید شود.');
       const confirmation = await tx.auditEvent.findFirst({ where: { driverId: id, eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' }, select: { id: true } });
-      if (!confirmation) throw new ConflictException('تأیید پرداخت اولیه در تاریخچه پیدا نشد.');
+      const legacyConfirmedStage = isAfterInitialPayment(driver.currentStage);
+      if (!confirmation && !legacyConfirmedStage) throw new ConflictException('تأیید پرداخت اولیه در تاریخچه پیدا نشد.');
       const products = Array.isArray(payload.products) && payload.products.length > 0
         ? this.cleanProducts(payload.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }))
         : await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });

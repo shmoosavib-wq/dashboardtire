@@ -10,10 +10,58 @@ const { DocumentsService } = require('../dist/drivers/documents.service.js');
 const { DriversService } = require('../dist/drivers/drivers.service.js');
 const { UsersService } = require('../dist/users/users.service.js');
 const { SupplierSettlementsService } = require('../dist/supplier-settlements/supplier-settlements.service.js');
+const { DashboardService } = require('../dist/dashboard/dashboard.service.js');
 const { dateOnly, hasRole, nonEmptyText, nonNegativeInteger, positiveMoney, requireRole } = require('../dist/drivers/workflow.js');
 
 // Unit tests keep Prisma in memory; the smoke suite separately checks these flows against local PostgreSQL.
 const actor = (id, ...roles) => ({ id, name: id, username: id, roles });
+
+test('dashboard sales count represents tire pairs sold, not confirmed driver cases', async () => {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const dashboard = new DashboardService({
+    driver: {
+      count: async () => 1,
+      groupBy: async () => [],
+    },
+    auditEvent: {
+      findMany: async (args) => args.where.eventType === 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' ? [{
+        driverId: 'driver-1', createdAt: new Date(), details: { paymentDate: today },
+        driver: {
+          drafts: [{ payload: { products: [{ quantity: 2 }, { quantity: '5' }] } }],
+          products: [{ quantity: 2 }, { quantity: 5 }],
+        },
+      }] : [],
+    },
+    stageDraft: { findMany: async () => [] },
+  });
+
+  const result = await dashboard.summary('30d', 'daily', actor('sales', 'SALES_OPERATIONS'));
+  assert.equal(result.totals.salesCount, 7);
+  assert.equal(result.series.reduce((sum, day) => sum + day.salesCount, 0), 7);
+});
+
+test('historical delivery cases with confirmed payment appear in installments without a legacy audit event', async () => {
+  let query;
+  const service = new DriversService({
+    driver: {
+      findMany: async (args) => {
+        query = args;
+        return [{
+          id: 'legacy-driver', fullName: 'Legacy Driver', currentStage: 'DELIVERY_FINAL_DOCS',
+          drafts: [{ payload: { products: [{ title: 'Tire', quantity: 1, saleUnitPrice: '5001' }], paymentAmount: '2000', paymentDate: '2026-09-23', paymentReceivedConfirmed: true } }],
+          products: [{ id: 'product-1', title: 'Tire', quantity: 1, saleUnitPrice: 5001n }],
+          installments: [], auditEvents: [],
+        }];
+      },
+    },
+  });
+
+  const rows = await service.listInstallments(actor('finance', 'LEGAL_FINANCE'));
+  assert.ok(query.where.OR.some((condition) => condition.currentStage?.in.includes('DELIVERY_FINAL_DOCS')));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].needsPlan, true);
+  assert.equal(rows[0].initialPaymentAmount, '2000');
+});
 
 test('supplier settlement driver picker includes delivery and completed cases in one API', async () => {
   let query;

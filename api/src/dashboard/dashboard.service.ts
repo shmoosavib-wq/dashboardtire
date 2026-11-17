@@ -68,6 +68,16 @@ function readSaleAmount(payload: JsonObject, products: { quantity: number; saleU
   }, 0n);
 }
 
+function readSaleQuantity(payload: JsonObject, products: { quantity: number }[]): number {
+  const draftProducts = Array.isArray(payload.products) ? payload.products : null;
+  const source = draftProducts?.length ? draftProducts : products;
+  return source.reduce((sum, item) => {
+    if (!item || typeof item !== 'object') return sum;
+    const quantity = Number((item as Record<string, unknown>).quantity);
+    return Number.isSafeInteger(quantity) && quantity > 0 ? sum + quantity : sum;
+  }, 0);
+}
+
 function isFinancialUser(actor: AuthenticatedUser): boolean {
   return actor.roles.includes(UserRole.SUPER_ADMIN) || actor.roles.includes(UserRole.LEGAL_FINANCE);
 }
@@ -157,10 +167,11 @@ export class DashboardService {
         if (!bucket) continue;
         const sale = asAmount(details.saleAmount) ?? readSaleAmount(payload, event.driver?.products || []);
         const payment = asAmount(details.initialPaymentAmount) ?? asAmount(payload.paymentAmount) ?? 0n;
-        bucket.salesCount += 1;
+        const pairsSold = readSaleQuantity(payload, event.driver?.products || []);
+        bucket.salesCount += pairsSold;
         bucket.salesAmount += sale;
         bucket.receivedAmount += payment;
-        salesCount += 1;
+        salesCount += pairsSold;
         salesAmount += sale;
         initialReceived += payment;
       }
@@ -191,10 +202,11 @@ export class DashboardService {
         if (!bucket) continue;
         const sale = readSaleAmount(payload, draftRow.driver.products);
         const payment = asAmount(payload.paymentAmount) ?? 0n;
-        bucket.salesCount += 1;
+        const pairsSold = readSaleQuantity(payload, draftRow.driver.products);
+        bucket.salesCount += pairsSold;
         bucket.salesAmount += sale;
         bucket.receivedAmount += payment;
-        salesCount += 1;
+        salesCount += pairsSold;
         salesAmount += sale;
         initialReceived += payment;
       }
@@ -280,7 +292,15 @@ export class DashboardService {
 
     const confirmations = await this.prisma.auditEvent.findMany({
       where: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT', driverId: { not: null } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { driverId: true, createdAt: true, details: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
+        driverId: true, createdAt: true, details: true,
+        driver: {
+          select: {
+            drafts: { where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION }, select: { payload: true } },
+            products: { select: { quantity: true } },
+          },
+        },
+      },
     });
     const countedDrivers = new Set<string>();
     for (const event of confirmations) {
@@ -291,11 +311,12 @@ export class DashboardService {
         ? details.paymentDate : dateKey(event.createdAt);
       if (date < firstDay || date >= endExclusive) continue;
       const bucket = buckets.get(granularity === 'daily' ? date : monthKey(date));
-      if (bucket) bucket.salesCount += 1;
+      const payload = asObject(event.driver?.drafts[0]?.payload);
+      if (bucket) bucket.salesCount += readSaleQuantity(payload, event.driver?.products || []);
     }
     const confirmedDrafts = await this.prisma.stageDraft.findMany({
       where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION },
-      select: { driverId: true, payload: true, driver: { select: { createdAt: true } } },
+      select: { driverId: true, payload: true, driver: { select: { createdAt: true, products: { select: { quantity: true } } } } },
     });
     for (const draftRow of confirmedDrafts) {
       if (countedDrivers.has(draftRow.driverId)) continue;
@@ -306,7 +327,7 @@ export class DashboardService {
         ? payload.paymentDate : dateKey(draftRow.driver.createdAt);
       if (date < firstDay || date >= endExclusive) continue;
       const bucket = buckets.get(granularity === 'daily' ? date : monthKey(date));
-      if (bucket) bucket.salesCount += 1;
+      if (bucket) bucket.salesCount += readSaleQuantity(payload, draftRow.driver.products);
     }
     const rows = keys.map((key) => ({ ...buckets.get(key)!, labelKey: key }));
     return {
