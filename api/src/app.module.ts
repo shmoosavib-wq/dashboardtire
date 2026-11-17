@@ -7,9 +7,10 @@ import { DatabaseModule } from './database.module';
 import { DriversModule } from './drivers/drivers.module';
 import { UsersModule } from './users/users.module';
 import { SupplierSettlementsModule } from './supplier-settlements/supplier-settlements.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
-  imports: [DatabaseModule, AuthModule, AuditModule, DriversModule, UsersModule, SupplierSettlementsModule],
+  imports: [DatabaseModule, AuthModule, AuditModule, DriversModule, UsersModule, SupplierSettlementsModule, DashboardModule],
   providers: [{ provide: APP_GUARD, useClass: CsrfGuard }],
 })
 export class AppModule {}

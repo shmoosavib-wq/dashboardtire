@@ -7,6 +7,7 @@ type Installment = { id: string; number: number; amount: string; dueAt: string; 
 type InstallmentDriver = {
   id: string; fullName: string; mobile: string; archivedAt: string | null;
   initialPaymentAmount: string | null; initialPaymentDate: string | null;
+  needsPlan: boolean;
   products: { id: string; title: string; quantity: number; saleUnitPrice: string | null }[];
   installments: Installment[];
 };
@@ -82,6 +83,8 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
   const [search, setSearch] = useState('');
   const [paymentTarget, setPaymentTarget] = useState<{ driver: InstallmentDriver; installment: Installment } | null>(null);
   const [today, setToday] = useState(tehranToday);
+  const [creatingPlanId, setCreatingPlanId] = useState<string | null>(null);
+  const [planError, setPlanError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,13 +127,27 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
     notify('تاریخ پرداخت قسط ثبت شد.');
   }
 
+  async function createPlan(driver: InstallmentDriver) {
+    setCreatingPlanId(driver.id);
+    setPlanError('');
+    try {
+      await api(`/drivers/${driver.id}/installments`, { method: 'POST' });
+      await load();
+      notify('برنامهٔ اقساط پرونده ساخته شد.');
+    } catch (reason) {
+      setPlanError(reason instanceof Error ? reason.message : 'ساخت برنامهٔ اقساط انجام نشد.');
+    } finally {
+      setCreatingPlanId(null);
+    }
+  }
+
   return <div className="page-stack installment-page">
     <header className="page-heading">
-      <div><div className="eyebrow">پیگیری بازپرداخت رانندگان</div><h1>اقساط رانندگان</h1><p>سررسید هر قسط و تاریخ واقعی پرداخت را جداگانه ببینید و ثبت کنید.</p></div>
+      <div><div className="eyebrow">پیگیری بازپرداخت رانندگان</div><h1>اقساط رانندگان</h1><p>سررسید هر قسط و تاریخ واقعی پرداخت را جداگانه ببینید و ثبت کنید؛ پرونده‌های قدیمیِ واجد شرایط را هم می‌توانید به برنامهٔ اقساط اضافه کنید.</p></div>
     </header>
 
     <div className="installment-summary" aria-label="خلاصه اقساط">
-      <div><span>رانندگان دارای برنامه</span><strong>{faNumber(counts.all)}</strong></div>
+      <div><span>پرونده‌های واجد شرایط اقساط</span><strong>{faNumber(counts.all)}</strong></div>
       <div><span>دارای قسط پرداخت‌نشده</span><strong>{faNumber(counts.unpaid)}</strong></div>
       <div><span>همهٔ اقساط پرداخت‌شده</span><strong>{faNumber(counts.paid)}</strong></div>
     </div>
@@ -143,6 +160,7 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
       </div>
       <label className="installment-search"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="جستجو نام راننده، موبایل یا کالا" aria-label="جستجو در اقساط" /></label>
     </div>
+    {planError && <div className="alert error" role="alert">{planError}<button type="button" className="text-button" onClick={() => setPlanError('')}>بستن</button></div>}
 
     {loading ? <div className="installment-loading"><LoadingIndicator label="در حال دریافت فهرست اقساط…" /></div>
       : loadError ? <div className="empty-state installment-empty"><p>{loadError}</p><button type="button" className="btn" onClick={() => void load()}>تلاش دوباره</button></div>
@@ -159,9 +177,11 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
                   <td><div className="installment-driver-name"><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.archivedAt && <span className="archive-tag">آرشیو</span>}</small></div></td>
                   <td className="installment-products">{driver.products.length ? driver.products.map((item) => `${item.title} (${faNumber(item.quantity)})`).join('، ') : '—'}</td>
                   <td>{driver.initialPaymentAmount ? <><strong>{formatMoney(driver.initialPaymentAmount)} تومان</strong><small className="installment-subdate">{displayInstallmentDate(driver.initialPaymentDate)}</small></> : '—'}</td>
-                  <td>{faNumber(paidCount)} از {faNumber(driver.installments.length)} پرداخت‌شده</td>
-                  <td>{overdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : paidCount === driver.installments.length ? <span className="status-pill success">تکمیل‌شده</span> : <span className="status-pill">در جریان</span>}</td>
-                  <td><button type="button" className="btn small installment-expand" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : driver.id)}>{expanded ? 'بستن جزئیات' : 'مشاهده اقساط'}<span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button></td>
+                  <td>{driver.needsPlan ? 'برنامه ثبت نشده' : <>{faNumber(paidCount)} از {faNumber(driver.installments.length)} پرداخت‌شده</>}</td>
+                  <td>{driver.needsPlan ? <span className="status-pill">نیازمند ساخت برنامه</span> : overdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : paidCount === driver.installments.length ? <span className="status-pill success">تکمیل‌شده</span> : <span className="status-pill">در جریان</span>}</td>
+                  <td>{driver.needsPlan
+                    ? <button type="button" className="btn small primary" disabled={creatingPlanId !== null} onClick={() => void createPlan(driver)}>{creatingPlanId === driver.id ? 'در حال ساخت…' : 'ساخت برنامه'}</button>
+                    : <button type="button" className="btn small installment-expand" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : driver.id)}>{expanded ? 'بستن جزئیات' : 'مشاهده اقساط'}<span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>}</td>
                 </tr>
                 {expanded && <tr className="installment-detail-row"><td colSpan={7}>
                   <div className="installment-detail-head"><div><strong>برنامهٔ پرداخت {driver.fullName}</strong><small>تاریخ سررسید و پرداخت واقعی در ستون‌های جدا ثبت می‌شوند.</small></div><span>{faNumber(driver.installments.length)} قسط</span></div>

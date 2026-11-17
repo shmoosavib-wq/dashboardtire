@@ -8,15 +8,16 @@ import LoadingIndicator from './LoadingIndicator';
 import UsersPage from './UsersPage';
 import SupplierSettlementsPage from './SupplierSettlementsPage';
 import DriverInstallmentsPage from './DriverInstallmentsPage';
+import DashboardPage from './DashboardPage';
 import { can, roleNames, type Stage, type User } from './model';
 
-type Section = 'flow' | 'drivers' | 'users' | 'archive' | 'audit' | 'supplier-settlements' | 'installments';
+type Section = 'dashboard' | 'flow' | 'drivers' | 'users' | 'archive' | 'audit' | 'supplier-settlements' | 'installments';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => window.localStorage.getItem('sababar-theme') === 'dark' ? 'dark' : 'light');
   const [initialized, setInitialized] = useState<boolean | null>(null);
-  const [section, setSection] = useState<Section>('flow');
+  const [section, setSection] = useState<Section>('dashboard');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panelMode, setPanelMode] = useState<'flow' | 'dossier'>('flow');
   const [flowStage, setFlowStage] = useState<Stage | ''>('NEED_DECLARED');
@@ -59,13 +60,14 @@ export default function App() {
 
   const isAdmin = can(user, 'SUPER_ADMIN');
   const viewingDossier = Boolean(selectedId && panelMode === 'dossier');
-  const title = viewingDossier ? 'پرونده راننده' : section === 'flow' ? 'گردش فروش' : section === 'drivers' ? 'پرونده رانندگان' : section === 'users' ? 'مدیریت کاربران' : section === 'audit' ? 'گزارش رویدادها' : section === 'supplier-settlements' ? 'تسویه با تأمین‌کنندگان' : section === 'installments' ? 'اقساط رانندگان' : 'آرشیو پرونده‌ها';
+  const title = viewingDossier ? 'پرونده راننده' : section === 'dashboard' ? 'داشبورد فروش' : section === 'flow' ? 'گردش فروش' : section === 'drivers' ? 'پرونده رانندگان' : section === 'users' ? 'مدیریت کاربران' : section === 'audit' ? 'گزارش رویدادها' : section === 'supplier-settlements' ? 'تسویه با تأمین‌کنندگان' : section === 'installments' ? 'اقساط رانندگان' : 'آرشیو پرونده‌ها';
   return (
     <div className="app-frame">
       <aside className="sidebar">
         <div className="brand"><img src="/sababar-logo.png" alt="صبابار" /><div><strong>صبابار</strong><small>مدیریت فروش و پرونده رانندگان</small></div></div>
         <div className="nav-caption">فضای کاری</div>
         <nav>
+          <button className={section === 'dashboard' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('dashboard'); setSelectedId(null); }}><span className="nav-icon">◫</span>داشبورد فروش</button>
           <button className={section === 'flow' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('flow'); setSelectedId(null); setFlowStage('NEED_DECLARED'); }}><span className="nav-icon">↗</span>گردش فروش</button>
           <button className={section === 'drivers' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('drivers'); setSelectedId(null); }}><span className="nav-icon">♙</span>رانندگان</button>
           <button className={section === 'archive' ? 'nav-item active' : 'nav-item'} onClick={() => { setSection('archive'); setSelectedId(null); }}><span className="nav-icon">▣</span>آرشیو</button>
@@ -83,7 +85,9 @@ export default function App() {
         <section className="page-content">
           {viewingDossier && selectedId
             ? <DriverPanel driverId={selectedId} viewMode="dossier" user={user} notify={flash} onClose={() => setSelectedId(null)} onChanged={() => setDriversRefresh((version) => version + 1)} />
-            : section === 'users' && isAdmin
+            : section === 'dashboard'
+              ? <DashboardPage onOpenStage={(stage) => { setSelectedId(null); setSection('flow'); setFlowStage(stage); }} onOpenInstallments={() => { setSelectedId(null); setSection('installments'); }} />
+              : section === 'users' && isAdmin
               ? <UsersPage notify={flash} />
               : section === 'audit' && isAdmin ? <AuditPage />
               : section === 'installments' && can(user, 'LEGAL_FINANCE') ? <DriverInstallmentsPage notify={flash} />

@@ -88,28 +88,77 @@ export class DriversService {
   async listInstallments(actor: AuthenticatedUser) {
     requireRole(actor, UserRole.LEGAL_FINANCE);
     const drivers = await this.prisma.driver.findMany({
-      where: { installments: { some: {} } },
+      where: {
+        OR: [
+          { installments: { some: {} } },
+          { auditEvents: { some: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' } } },
+        ],
+      },
       orderBy: { fullName: 'asc' },
       include: {
         products: { select: { id: true, title: true, quantity: true, saleUnitPrice: true } },
         drafts: { where: { stage: 'PROFORMA_PAYMENT_RESERVATION' }, select: { payload: true } },
         installments: { orderBy: { number: 'asc' }, include: { paidBy: { select: { id: true, name: true } } } },
+        auditEvents: { where: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' }, select: { id: true }, take: 1 },
       },
     });
 
-    return drivers.map(({ drafts, products, installments, ...driver }) => {
+    return drivers.flatMap(({ drafts, products, installments, auditEvents, ...driver }) => {
       const payload = (drafts[0]?.payload || {}) as JsonObject;
-      return {
+      const sourceProducts = Array.isArray(payload.products) && payload.products.length ? payload.products : products;
+      const paymentAmount = String(payload.paymentAmount ?? '');
+      const paymentDate = typeof payload.paymentDate === 'string' ? payload.paymentDate : '';
+      let saleTotal = 0n;
+      let validProducts = sourceProducts.length > 0;
+      for (const product of sourceProducts) {
+        if (!product || typeof product !== 'object') {
+          validProducts = false;
+          break;
+        }
+        const row = product as Record<string, unknown>;
+        const quantity = Number(row.quantity);
+        const priceText = String(row.saleUnitPrice ?? '');
+        if (!Number.isSafeInteger(quantity) || quantity <= 0 || !/^\\d+$/.test(priceText)) {
+          validProducts = false;
+          break;
+        }
+        saleTotal += BigInt(quantity) * BigInt(priceText);
+      }
+      const paymentDayIsValid = /^\\d{4}-\\d{2}-\\d{2}$/.test(paymentDate)
+        && !Number.isNaN(Date.parse(`${paymentDate}T00:00:00.000Z`))
+        && new Date(`${paymentDate}T00:00:00.000Z`).toISOString().slice(0, 10) === paymentDate;
+      const remaining = /^\\d+$/.test(paymentAmount) && BigInt(paymentAmount) <= saleTotal
+        ? saleTotal - BigInt(paymentAmount) : 0n;
+      const needsPlan = installments.length === 0
+        && auditEvents.length > 0
+        && payload.paymentReceivedConfirmed === true
+        && paymentDayIsValid
+        && validProducts
+        && saleTotal > 0n
+        && BigInt(paymentAmount || '0') > 0n
+        && remaining >= BigInt(INSTALLMENT_COUNT);
+      if (!installments.length && !needsPlan) return [];
+      const displayProducts = products.length ? products.map((product) => ({
+        id: product.id,
+        title: product.title,
+        quantity: product.quantity,
+        saleUnitPrice: product.saleUnitPrice === null ? null : String(product.saleUnitPrice),
+      })) : Array.isArray(payload.products) ? payload.products.map((item, index) => {
+        const row = item as Record<string, unknown>;
+        return {
+          id: `${driver.id}-${index}`,
+          title: typeof row.title === 'string' ? row.title : 'کالای ثبت‌شده',
+          quantity: Number(row.quantity) || 0,
+          saleUnitPrice: typeof row.saleUnitPrice === 'string' || typeof row.saleUnitPrice === 'number' ? String(row.saleUnitPrice) : null,
+        };
+      }) : [];
+      return [{
         ...driver,
         initialPaymentAmount: typeof payload.paymentAmount === 'string' || typeof payload.paymentAmount === 'number'
           ? String(payload.paymentAmount) : null,
         initialPaymentDate: typeof payload.paymentDate === 'string' ? payload.paymentDate : null,
-        products: products.map((product) => ({
-          id: product.id,
-          title: product.title,
-          quantity: product.quantity,
-          saleUnitPrice: product.saleUnitPrice === null ? null : String(product.saleUnitPrice),
-        })),
+        needsPlan,
+        products: displayProducts,
         installments: installments.map((installment) => ({
           id: installment.id,
           number: installment.number,
@@ -118,7 +167,7 @@ export class DriversService {
           paidAt: installment.paidAt,
           paidBy: installment.paidBy,
         })),
-      };
+      }];
     });
   }
 
@@ -410,6 +459,7 @@ export class DriversService {
       ...(input.note?.trim() ? { note: input.note.trim() } : {}),
     };
     return this.prisma.$transaction(async (tx) => {
+      let financialSnapshot: JsonObject = {};
       const changed = await tx.driver.updateMany({
         where: { id, currentStage: stage, stageStatus: oldStatus, archivedAt: null },
         data: { currentStage: nextStage, stageStatus: nextStatus },
@@ -438,6 +488,12 @@ export class DriversService {
         const products = Array.isArray(payload.products) && payload.products.length > 0
           ? this.cleanProducts(payload.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }))
           : await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
+        const saleAmount = products.reduce((sum, product) => sum + BigInt(product.quantity) * BigInt(product.saleUnitPrice || 0), 0n);
+        financialSnapshot = {
+          paymentDate: String(payload.paymentDate),
+          initialPaymentAmount: String(payload.paymentAmount),
+          saleAmount: String(saleAmount),
+        };
         const installments = buildInstallmentRows(id, payload.paymentAmount, payload.paymentDate, products);
         if (installments.length) {
           const created = await tx.driverInstallment.createMany({ data: installments, skipDuplicates: true });
@@ -454,7 +510,7 @@ export class DriversService {
           }
         }
       }
-      await tx.auditEvent.create({ data: { driverId: id, actorId: actor.id, eventType: `WORKFLOW_${action}`, details } });
+      await tx.auditEvent.create({ data: { driverId: id, actorId: actor.id, eventType: `WORKFLOW_${action}`, details: { ...details, ...financialSnapshot } } });
       return tx.driver.findUnique({ where: { id } });
     });
   }
@@ -487,7 +543,8 @@ export class DriversService {
 
   async createInstallmentPlan(id: string, actor: AuthenticatedUser) {
     requireRole(actor, UserRole.LEGAL_FINANCE);
-    await this.getActiveDriver(id);
+    const driver = await this.prisma.driver.findUnique({ where: { id }, select: { id: true } });
+    if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
     return this.prisma.$transaction(async (tx) => {
       const existingCount = await tx.driverInstallment.count({ where: { driverId: id } });
       if (existingCount >= INSTALLMENT_COUNT) return { created: false, count: existingCount };
