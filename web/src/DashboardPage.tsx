@@ -156,9 +156,9 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
     { label: 'پرونده‌های فعال', value: data ? faNumber(data.activeCases) : '—', helper: 'وضعیت همین لحظه', kind: 'cases', glyph: '▣' },
     { label: 'فروش ثبت‌شده', value: data ? faNumber(data.totals.salesCount) : '—', helper: periodLabels[period], kind: 'sales', glyph: '↗' },
     ...(data?.hasFinancialAccess ? [
-      { label: 'ارزش فروش', value: data.totals.salesAmount === null ? '—' : shortMoney(amount(data.totals.salesAmount)), helper: `تومان · ${periodLabels[period]}`, kind: 'gross', glyph: '◉' },
-      { label: 'مبلغ وصول‌شده', value: data.totals.receivedAmount === null ? '—' : shortMoney(amount(data.totals.receivedAmount)), helper: `تومان · ${periodLabels[period]}`, kind: 'received', glyph: '✓' },
-      { label: 'اقساط معوق', value: data.totals.overdueAmount === null ? '—' : shortMoney(amount(data.totals.overdueAmount)), helper: `تومان · وضعیت امروز · ${faNumber(data.totals.overdueCount || 0)} قسط`, kind: 'overdue', glyph: '!' },
+      { label: 'ارزش فروش', value: data.totals.salesAmount === null ? '—' : formatMoney(data.totals.salesAmount), helper: `تومان · ${periodLabels[period]}`, kind: 'gross', glyph: '◉' },
+      { label: 'مبلغ وصول‌شده', value: data.totals.receivedAmount === null ? '—' : formatMoney(data.totals.receivedAmount), helper: `تومان · ${periodLabels[period]}`, kind: 'received', glyph: '✓' },
+      { label: 'اقساط معوق', value: data.totals.overdueAmount === null ? '—' : formatMoney(data.totals.overdueAmount), helper: `تومان · وضعیت امروز · ${faNumber(data.totals.overdueCount || 0)} قسط`, kind: 'overdue', glyph: '!' },
     ] : []),
   ];
 
@@ -208,8 +208,8 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
       {!data && loading ? <div className="dash-chart-loading"><LoadingIndicator label="در حال دریافت روندها…" compact /></div>
         : <>
           <div className="dash-chart-summary"><div><small>{selected ? localizeKey(selected.labelKey, granularity, true) : moneyMetricNames[activeMetric as Exclude<Metric, 'salesCount'>] || 'تعداد فروش'}</small><strong>{selected
-            ? activeMetric === 'salesCount' ? faNumber(selected.salesCount) : `${shortMoney(amount(selected[activeMetric]))} تومان`
-            : activeMetric === 'salesCount' ? `${faNumber(chartTotal)} فروش` : `${shortMoney(chartTotal)} تومان`}</strong></div><span>{selected ? 'مقدار در این نقطه' : 'جمع بازهٔ نمودار'}</span></div>
+            ? activeMetric === 'salesCount' ? faNumber(selected.salesCount) : `${formatMoney(selected[activeMetric])} تومان`
+            : activeMetric === 'salesCount' ? `${faNumber(chartTotal)} فروش` : `${formatMoney(chartTotal)} تومان`}</strong></div><span>{selected ? 'مقدار در این نقطه' : 'جمع بازهٔ نمودار'}</span></div>
           <Chart key={`${period}-${granularity}-${activeMetric}`} data={data?.series || []} metric={activeMetric} granularity={granularity} onSelect={setSelectedPoint} />
           {!data?.hasFinancialAccess && <p className="dash-access-note">مبالغ فروش و وصول برای نقش حقوقی و مالی و مدیر سامانه نمایش داده می‌شوند.</p>}
         </>}
@@ -218,7 +218,7 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
     <div className="dash-lower-grid">
       {data?.hasFinancialAccess && <section className="dash-section dash-due-section">
         <div className="dash-section-head"><div><h2>پیگیری اقساط</h2><p>سررسیدهای گذشته و ۳۰ روز آینده</p></div><button type="button" className="dash-text-link" onClick={onOpenInstallments}>مدیریت اقساط <span>←</span></button></div>
-        <div className="dash-due-summary"><div className="dash-due-total"><span className="dash-alert-mark">!</span><div><small>مبلغ معوق</small><strong>{data.totals.overdueAmount === null ? '—' : `${shortMoney(amount(data.totals.overdueAmount))} تومان`}</strong></div></div><div className="dash-upcoming-total"><small>سررسید ۳۰ روز آینده</small><strong>{data.totals.nextDueAmount === null ? '—' : `${shortMoney(amount(data.totals.nextDueAmount))} تومان`}</strong><span>{faNumber(data.totals.nextDueCount || 0)} قسط</span></div></div>
+        <div className="dash-due-summary"><div className="dash-due-total"><span className="dash-alert-mark">!</span><div><small>مبلغ معوق</small><strong>{data.totals.overdueAmount === null ? '—' : `${formatMoney(data.totals.overdueAmount)} تومان`}</strong></div></div><div className="dash-upcoming-total"><small>سررسید ۳۰ روز آینده</small><strong>{data.totals.nextDueAmount === null ? '—' : `${formatMoney(data.totals.nextDueAmount)} تومان`}</strong><span>{faNumber(data.totals.nextDueCount || 0)} قسط</span></div></div>
         <div className="dash-due-list">
           {loading ? <div className="dash-inline-loading"><LoadingIndicator label="در حال دریافت سررسیدها…" compact /></div>
             : data.dueItems?.length ? data.dueItems.map((item, index) => <div className={`dash-due-row ${item.overdue ? 'overdue' : ''}`} key={item.id} style={{ animationDelay: `${index * 45}ms` }}>
