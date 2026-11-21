@@ -124,7 +124,7 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       </div>
       {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
       <div className="table-wrap">
-        <table className="data-table mobile-card-table driver-table">
+        <table className={`data-table mobile-card-table driver-table${showContractNumber ? ' has-contract-number' : ''}`}>
           <thead><tr><th>#</th><th>راننده</th><th>کد ملی</th><th>کالا</th>{showContractNumber && <th>شماره قرارداد</th>}<th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>اقدام</th></tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={columnCount}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
