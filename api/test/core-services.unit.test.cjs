@@ -302,6 +302,48 @@ test('previous-stage correction requires a saved draft and remains available on 
   assert.equal(completedAudit.details.currentStage, 'COMPLETED');
 });
 
+test('editing confirmed initial payment recalculates unpaid installments in the same transaction', async () => {
+  const driver = { id: 'driver-1', archivedAt: null, currentStage: 'COMPLETED' };
+  const storedDraft = {
+    id: 'proforma-draft',
+    version: 3,
+    payload: {
+      products: [{ title: 'Tire', quantity: 2, saleUnitPrice: '264000000', supplyUnitCost: '200000000' }],
+      paymentAmount: '66000000', paymentDate: '2026-10-14', paymentReceivedConfirmed: true,
+    },
+  };
+  let replacementRows;
+  let deletedRows;
+  const audits = [];
+  const tx = {
+    stageDraft: {
+      findUnique: async () => storedDraft,
+      updateMany: async () => ({ count: 1 }),
+      findUniqueOrThrow: async () => ({ ...storedDraft, version: 4 }),
+    },
+    driverInstallment: {
+      findMany: async () => [154000000n, 154000000n, 154000000n].map((amount) => ({ amount, paidAt: null })),
+      deleteMany: async (args) => { deletedRows = args; return { count: 3 }; },
+      createMany: async ({ data }) => { replacementRows = data; return { count: data.length }; },
+    },
+    auditEvent: { create: async ({ data }) => audits.push(data) },
+  };
+  const service = new DriversService({
+    driver: { findUnique: async () => driver },
+    $transaction: async (callback) => callback(tx),
+  });
+
+  await service.saveDraft('driver-1', {
+    stage: 'PROFORMA_PAYMENT_RESERVATION', payload: { paymentAmount: '132000000' },
+  }, actor('finance', 'LEGAL_FINANCE'));
+
+  assert.deepEqual(deletedRows, { where: { driverId: 'driver-1', paidAt: null } });
+  assert.deepEqual(replacementRows.map(({ amount }) => amount), [132000000n, 132000000n, 132000000n]);
+  assert.ok(audits.some((event) => event.eventType === 'INSTALLMENT_PLAN_RECALCULATED'
+    && event.details.previousTotal === '462000000'
+    && event.details.newTotal === '396000000'));
+});
+
 test('driver draft rejects unknown fields before opening a transaction', async () => {
   let transactionOpened = false;
   const service = new DriversService({

@@ -566,9 +566,13 @@ html[data-theme="dark"] .timeline-older summary{color:#7ae2d4}
 .installment-products{text-align:right!important;line-height:1.7}
 .installment-status{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;font-size:11px;font-weight:700}
 .installment-status.overdue{color:#b83838}
+.installment-status.due-soon{color:#a66b0a}
 .overdue-pulse{position:relative;display:inline-block;width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:#d94343;box-shadow:0 0 0 0 #d9434355;animation:installment-alert-pulse 1.8s ease-out infinite}
+.due-soon-pulse{position:relative;display:inline-block;width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:#d5962d;box-shadow:0 0 0 0 #d5962d55;animation:installment-due-soon-pulse 2s ease-out infinite}
 @keyframes installment-alert-pulse{0%{box-shadow:0 0 0 0 #d9434355}65%{box-shadow:0 0 0 7px #d9434300}100%{box-shadow:0 0 0 0 #d9434300}}
+@keyframes installment-due-soon-pulse{0%{box-shadow:0 0 0 0 #d5962d55}65%{box-shadow:0 0 0 7px #d5962d00}100%{box-shadow:0 0 0 0 #d5962d00}}
 .installment-driver-row.has-overdue td:first-child{box-shadow:inset -3px 0 #d94343}
+.installment-driver-row.has-due-soon td:first-child{box-shadow:inset -3px 0 #d5962d}
 .installment-detail-row>td{padding:0!important;background:#f8fafb!important}
 .installment-detail-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 20px 12px}
 .installment-detail-head>div{display:flex;flex-direction:column;gap:4px}
@@ -582,6 +586,8 @@ html[data-theme="dark"] .timeline-older summary{color:#7ae2d4}
 .installment-child-table .btn{min-height:34px}
 .installment-child-overdue td{background:#fffafa}
 .installment-child-overdue td:first-child{box-shadow:inset -3px 0 #d94343}
+.installment-child-due-soon td{background:#fffaf0}
+.installment-child-due-soon td:first-child{box-shadow:inset -3px 0 #d5962d}
 .installment-not-recorded{color:#9aa8b2}
 .installment-expand{gap:8px}
 .installment-expand[aria-expanded="true"]{border-color:#b8e8df;background:var(--teal-soft);color:var(--teal-dark)}
@@ -598,11 +604,12 @@ html[data-theme="dark"] .installment-filter.active span{background:#23534b;color
 html[data-theme="dark"] .installment-filter span{background:#263a4b;color:#b5c5d0}
 html[data-theme="dark"] .installment-detail-row>td{background:#142637!important}
 html[data-theme="dark"] .installment-child-overdue td{background:#321f27}
+html[data-theme="dark"] .installment-child-due-soon td{background:#332b1c}
 html[data-theme="dark"] .installment-payment-context{background:#142637}
 html[data-theme="dark"] .archive-tag{background:#2a3945;color:#bbc6ce}
 @media(max-width:920px){.installment-toolbar{align-items:stretch;flex-direction:column}.installment-search{width:100%}}
 @media(max-width:760px){.installment-page{gap:18px}.installment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.installment-summary>div{min-height:65px;padding:10px 12px}.installment-summary>div:nth-child(2){border-left:0}.installment-summary>div:nth-child(-n+2){border-bottom:1px solid var(--line)}.installment-summary span{font-size:10px}.installment-summary strong{font-size:17px}.installment-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.installment-filter{justify-content:center;padding-inline:7px;font-size:11px}.installment-detail-head{align-items:flex-start;padding:14px 12px 10px}.installment-child-wrap{margin:0 8px 10px}}
-@media(prefers-reduced-motion:reduce){.overdue-pulse{animation:none;box-shadow:0 0 0 3px #d9434322}}
+@media(prefers-reduced-motion:reduce){.overdue-pulse{animation:none;box-shadow:0 0 0 3px #d9434322}.due-soon-pulse{animation:none;box-shadow:0 0 0 3px #d5962d22}}
 
 /* Keep installment tables inside the laptop workspace and anchor the calendar without a first-frame jump. */
 .installment-page{width:100%;max-width:100%;min-width:0}

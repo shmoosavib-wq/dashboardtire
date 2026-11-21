@@ -99,6 +99,10 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
   const canCreate = mode !== 'archive' && can(user, 'SALES_OPERATIONS');
   const visibleStages = useMemo(() => stageList, []);
   const selectedStageName = selectedStage === 'COMPLETED' ? 'تکمیل‌شده' : visibleStages.find((item) => item.id === selectedStage)?.compact;
+  const contractStageIndex = visibleStages.findIndex((item) => item.id === 'CONTRACT_CHEQUE');
+  const stagePosition = (stage: Stage) => stage === 'COMPLETED' ? visibleStages.length : visibleStages.findIndex((item) => item.id === stage);
+  const showContractNumber = mode === 'flow' && (!selectedStage || stagePosition(selectedStage) >= contractStageIndex);
+  const columnCount = showContractNumber ? 8 : 7;
   const totalPages = Math.max(1, Math.ceil(drivers.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageDrivers = drivers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -121,15 +125,16 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
       <div className="table-wrap">
         <table className="data-table mobile-card-table driver-table">
-          <thead><tr><th>#</th><th>راننده</th><th>کد ملی</th><th>کالا</th><th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>اقدام</th></tr></thead>
+          <thead><tr><th>#</th><th>راننده</th><th>کد ملی</th><th>کالا</th>{showContractNumber && <th>شماره قرارداد</th>}<th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>اقدام</th></tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={7}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
-              : drivers.length === 0 ? <tr><td colSpan={7}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${selectedStageName}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
+            {loading ? <tr><td colSpan={columnCount}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
+              : drivers.length === 0 ? <tr><td colSpan={columnCount}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${selectedStageName}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
               : pageDrivers.map((driver, index) => {
                 return <tr key={driver.id} onDoubleClick={() => onOpen(driver.id)}>
                   <td className="row-number" data-label="ردیف">{faNumber((currentPage - 1) * pageSize + index + 1)}</td><td data-label="راننده"><div className="driver-cell"><span className="driver-avatar">{driver.fullName.slice(0, 1)}</span><div><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}</small></div></div></td>
                   <td data-label="کد ملی">{driver.nationalId ? faDigits(driver.nationalId) : '—'}</td>
                   <td data-label="کالا"><span className="driver-product-name">{driver.proformaProducts?.join('، ') || driver.products?.map((product) => product.title).filter(Boolean).join('، ') || driver.productHint || '—'}</span></td>
+                  {showContractNumber && <td data-label="شماره قرارداد">{stagePosition(driver.currentStage) >= contractStageIndex ? driver.contractNumber || '—' : '—'}</td>}
                   <td data-label="وضعیت اقدام"><span className={'status-pill ' + (driver.stageStatus === 'COMPLETED' ? 'success' : driver.stageStatus.includes('REJECTED') ? 'warning' : '')}>{statusNames[driver.stageStatus] || statusNames[driver.currentStage] || driver.stageStatus}</span></td>
                   <td className="responsible-cell" data-label="مسئول پیگیری">{responsible[driver.currentStage]}</td>
                   <td data-label="اقدام"><div className="row-actions">{mode === 'archive' && can(user, 'SUPER_ADMIN') && <button className="btn small subtle" disabled={restoringId === driver.id} onClick={() => void restoreArchivedDriver(driver)}>{restoringId === driver.id ? 'در حال بازگردانی…' : 'بازگردانی به گردش'}</button>}{mode === 'flow' && (driver.currentStage === 'COMPLETED'

@@ -106,15 +106,17 @@ export class DriversService {
         products: { select: { id: true, title: true, quantity: true, saleUnitPrice: true } },
         drafts: { where: { stage: 'PROFORMA_PAYMENT_RESERVATION' }, select: { payload: true } },
         installments: { orderBy: { number: 'asc' }, include: { paidBy: { select: { id: true, name: true } } } },
-        auditEvents: { where: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' }, select: { id: true }, take: 1 },
+        auditEvents: { where: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' }, select: { id: true, details: true }, take: 1 },
       },
     });
 
     return drivers.flatMap(({ drafts, products, installments, auditEvents, ...driver }) => {
       const payload = (drafts[0]?.payload || {}) as JsonObject;
+      const confirmationDetails = (auditEvents[0]?.details || {}) as JsonObject;
       const sourceProducts = Array.isArray(payload.products) && payload.products.length ? payload.products : products;
-      const paymentAmount = String(payload.paymentAmount ?? '');
-      const paymentDate = typeof payload.paymentDate === 'string' ? payload.paymentDate : '';
+      const paymentAmount = String(payload.paymentAmount ?? confirmationDetails.initialPaymentAmount ?? '');
+      const paymentDate = typeof payload.paymentDate === 'string' ? payload.paymentDate
+        : typeof confirmationDetails.paymentDate === 'string' ? confirmationDetails.paymentDate : '';
       let saleTotal = 0n;
       let validProducts = sourceProducts.length > 0;
       for (const product of sourceProducts) {
@@ -163,8 +165,11 @@ export class DriversService {
       return [{
         ...driver,
         initialPaymentAmount: typeof payload.paymentAmount === 'string' || typeof payload.paymentAmount === 'number'
-          ? String(payload.paymentAmount) : null,
-        initialPaymentDate: typeof payload.paymentDate === 'string' ? payload.paymentDate : null,
+          ? String(payload.paymentAmount)
+          : typeof confirmationDetails.initialPaymentAmount === 'string' || typeof confirmationDetails.initialPaymentAmount === 'number'
+            ? String(confirmationDetails.initialPaymentAmount) : null,
+        initialPaymentDate: typeof payload.paymentDate === 'string' ? payload.paymentDate
+          : typeof confirmationDetails.paymentDate === 'string' ? confirmationDetails.paymentDate : null,
         needsPlan,
         products: displayProducts,
         installments: installments.map((installment) => ({
@@ -196,16 +201,17 @@ export class DriversService {
       include: {
         createdBy: { select: { id: true, name: true } },
         products: { select: { title: true, quantity: true } },
-        drafts: { where: { stage: 'PROFORMA_PAYMENT_RESERVATION' }, select: { payload: true } },
+        drafts: { where: { stage: { in: ['PROFORMA_PAYMENT_RESERVATION', 'CONTRACT_CHEQUE'] } }, select: { stage: true, payload: true } },
         _count: { select: { documents: { where: { deletedAt: null } }, auditEvents: true } },
       },
     });
     return drivers.map(({ drafts, ...driver }) => {
-      const payload = drafts[0]?.payload as { products?: { title?: unknown }[] } | undefined;
-      const proformaProducts = Array.isArray(payload?.products)
-        ? payload.products.map((product) => typeof product.title === 'string' ? product.title.trim() : '').filter(Boolean)
+      const proformaPayload = drafts.find((draft) => draft.stage === 'PROFORMA_PAYMENT_RESERVATION')?.payload as { products?: { title?: unknown }[] } | undefined;
+      const contractPayload = drafts.find((draft) => draft.stage === 'CONTRACT_CHEQUE')?.payload as { contractNumber?: unknown } | undefined;
+      const proformaProducts = Array.isArray(proformaPayload?.products)
+        ? proformaPayload.products.map((product) => typeof product.title === 'string' ? product.title.trim() : '').filter(Boolean)
         : [];
-      return { ...driver, proformaProducts };
+      return { ...driver, proformaProducts, contractNumber: typeof contractPayload?.contractNumber === 'string' ? contractPayload.contractNumber : null };
     });
   }
 
@@ -303,6 +309,43 @@ export class DriversService {
         });
         const changedKeys = [...Object.keys(patch).filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(patch[key])), ...changedProfileKeys];
         if (!changedKeys.length) return current;
+        const installmentInputsChanged = input.stage === 'PROFORMA_PAYMENT_RESERVATION'
+          && changedKeys.some((key) => ['products', 'paymentAmount', 'paymentDate'].includes(key));
+        let recalculatedInstallments: ReturnType<typeof buildInstallmentRows> | null = null;
+        let priorInstallmentTotal = 0n;
+        if (installmentInputsChanged) {
+          const existingInstallments = await tx.driverInstallment.findMany({
+            where: { driverId: id },
+            select: { amount: true, paidAt: true },
+          });
+          if (existingInstallments.length) {
+            if (existingInstallments.some((installment) => installment.paidAt)) {
+              throw new ConflictException('پس از ثبت پرداخت قسط، اطلاعات مالی پرونده قابل ویرایش نیست؛ برای اصلاح اقساط با امور مالی هماهنگ کنید.');
+            }
+            priorInstallmentTotal = existingInstallments.reduce((sum, installment) => sum + installment.amount, 0n);
+            const productsWereEdited = changedKeys.includes('products');
+            const savedProducts = tx.driverProduct
+              ? await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } })
+              : [];
+            let products: { quantity: number; saleUnitPrice: bigint | number | null }[];
+            if (productsWereEdited && Array.isArray(merged.products)) {
+              products = this.cleanProducts(merged.products).map((product) => ({
+                quantity: product.quantity,
+                saleUnitPrice: BigInt(product.saleUnitPrice),
+              }));
+            } else if (savedProducts.length > 0) {
+              products = savedProducts;
+            } else if (Array.isArray(merged.products) && merged.products.length > 0) {
+              products = this.cleanProducts(merged.products).map((product) => ({
+                quantity: product.quantity,
+                saleUnitPrice: BigInt(product.saleUnitPrice),
+              }));
+            } else {
+              products = savedProducts;
+            }
+            recalculatedInstallments = buildInstallmentRows(id, merged.paymentAmount, merged.paymentDate, products);
+          }
+        }
         if (changedProfileKeys.length) {
           const data = Object.fromEntries(changedProfileKeys.map((key) => [key, profilePatch[key]]));
           await tx.driver.update({ where: { id }, data });
@@ -318,6 +361,12 @@ export class DriversService {
             data: { driverId: id, stage: input.stage, payload: merged as object, version: 1, updatedById: actor.id },
           });
         }
+        if (recalculatedInstallments) {
+          await tx.driverInstallment.deleteMany({ where: { driverId: id, paidAt: null } });
+          if (recalculatedInstallments.length) {
+            await tx.driverInstallment.createMany({ data: recalculatedInstallments });
+          }
+        }
         const draft = await tx.stageDraft.findUniqueOrThrow({ where: { driverId_stage: { driverId: id, stage: input.stage } } });
         await tx.auditEvent.create({
           data: {
@@ -327,6 +376,22 @@ export class DriversService {
             details: { stage: input.stage, changedKeys, version: draft.version, ...(isHistoricalEdit ? { currentStage: driver.currentStage } : {}) },
           },
         });
+        if (recalculatedInstallments) {
+          const nextTotal = recalculatedInstallments.reduce((sum, installment) => sum + installment.amount, 0n);
+          await tx.auditEvent.create({
+            data: {
+              driverId: id,
+              actorId: actor.id,
+              eventType: 'INSTALLMENT_PLAN_RECALCULATED',
+              details: {
+                previousTotal: String(priorInstallmentTotal),
+                newTotal: String(nextTotal),
+                count: recalculatedInstallments.length,
+                reason: changedKeys.filter((key) => ['products', 'paymentAmount', 'paymentDate'].includes(key)),
+              },
+            },
+          });
+        }
         return draft;
       }, { isolationLevel: 'Serializable' });
     } catch (error) {
@@ -501,6 +566,7 @@ export class DriversService {
           paymentDate: String(payload.paymentDate),
           initialPaymentAmount: String(payload.paymentAmount),
           saleAmount: String(saleAmount),
+          soldPairs: products.reduce((sum, product) => sum + product.quantity, 0),
         };
         const installments = buildInstallmentRows(id, payload.paymentAmount, payload.paymentDate, products);
         if (installments.length) {
@@ -555,7 +621,7 @@ export class DriversService {
     if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
     return this.prisma.$transaction(async (tx) => {
       const existingCount = await tx.driverInstallment.count({ where: { driverId: id } });
-      if (existingCount >= INSTALLMENT_COUNT) return { created: false, count: existingCount };
+      if (existingCount > 0) return { created: false, count: existingCount };
       const draft = await tx.stageDraft.findUnique({ where: { driverId_stage: { driverId: id, stage: 'PROFORMA_PAYMENT_RESERVATION' } } });
       const payload = (draft?.payload || {}) as JsonObject;
       if (payload.paymentReceivedConfirmed !== true) throw new ConflictException('پرداخت اولیه باید توسط مالی تأیید شود.');

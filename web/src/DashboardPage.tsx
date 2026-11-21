@@ -24,7 +24,7 @@ type DashboardResponse = {
     nextDueCount: number | null;
   };
   series: { key: string; labelKey: string; salesCount: number; salesAmount: string | null; receivedAmount: string | null; dueAmount: string | null }[];
-  dueItems: { id: string; driverId: string; driverName: string; number: number; amount: string; dueAt: string; overdue: boolean }[] | null;
+  dueItems: { id: string; driverId: string; driverName: string; number: number; amount: string; dueAt: string; overdue: boolean; dueSoon: boolean }[] | null;
   activity: { id: string; eventType: string; createdAt: string; driverId: string | null; driverName: string | null; actorName: string | null }[];
 };
 
@@ -221,8 +221,8 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
         <div className="dash-due-summary"><div className="dash-due-total"><span className="dash-alert-mark">!</span><div><small>مبلغ معوق</small><strong>{data.totals.overdueAmount === null ? '—' : `${formatMoney(data.totals.overdueAmount)} تومان`}</strong></div></div><div className="dash-upcoming-total"><small>سررسید ۳۰ روز آینده</small><strong>{data.totals.nextDueAmount === null ? '—' : `${formatMoney(data.totals.nextDueAmount)} تومان`}</strong><span>{faNumber(data.totals.nextDueCount || 0)} قسط</span></div></div>
         <div className="dash-due-list">
           {loading ? <div className="dash-inline-loading"><LoadingIndicator label="در حال دریافت سررسیدها…" compact /></div>
-            : data.dueItems?.length ? data.dueItems.map((item, index) => <div className={`dash-due-row ${item.overdue ? 'overdue' : ''}`} key={item.id} style={{ animationDelay: `${index * 45}ms` }}>
-              <span className="dash-due-indicator" aria-hidden="true">{item.overdue ? '!' : '◷'}</span><div className="dash-due-person"><strong>{item.driverName}</strong><small>قسط {faNumber(item.number)} · سررسید {displayDate(item.dueAt)}</small></div><strong className="dash-due-amount">{formatMoney(item.amount)} <small>تومان</small></strong><span className="dash-due-status">{item.overdue ? 'معوق' : 'در انتظار'}</span>
+            : data.dueItems?.length ? data.dueItems.map((item, index) => <div className={`dash-due-row${item.overdue ? ' overdue' : item.dueSoon ? ' due-soon' : ''}`} key={item.id} style={{ animationDelay: `${index * 45}ms` }}>
+              <span className="dash-due-indicator" aria-hidden="true">{item.overdue ? '!' : item.dueSoon ? '!' : '◷'}</span><div className="dash-due-person"><strong>{item.driverName}</strong><small>قسط {faNumber(item.number)} · سررسید {displayDate(item.dueAt)}</small></div><strong className="dash-due-amount">{formatMoney(item.amount)} <small>تومان</small></strong><span className="dash-due-status">{item.overdue ? 'معوق' : item.dueSoon ? 'نزدیک سررسید' : 'در انتظار'}</span>
             </div>) : <div className="dash-empty">در ۳۰ روز آینده قسط پرداخت‌نشده‌ای ثبت نشده است.</div>}
         </div>
       </section>}

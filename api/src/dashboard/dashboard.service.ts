@@ -78,6 +78,16 @@ function readSaleQuantity(payload: JsonObject, products: { quantity: number }[])
   }, 0);
 }
 
+function readConfirmedSaleQuantity(details: JsonObject, payload: JsonObject, products: { quantity: number }[]): number {
+  const snapshot = details.soldPairs;
+  return typeof snapshot === 'number' && Number.isSafeInteger(snapshot) && snapshot >= 0
+    ? snapshot : readSaleQuantity(payload, products);
+}
+
+function hasConfirmedInitialPayment(payload: JsonObject): boolean {
+  return payload.paymentReceivedConfirmed === true && (asAmount(payload.paymentAmount) ?? 0n) > 0n;
+}
+
 function isFinancialUser(actor: AuthenticatedUser): boolean {
   return actor.roles.includes(UserRole.SUPER_ADMIN) || actor.roles.includes(UserRole.LEGAL_FINANCE);
 }
@@ -167,7 +177,7 @@ export class DashboardService {
         if (!bucket) continue;
         const sale = asAmount(details.saleAmount) ?? readSaleAmount(payload, event.driver?.products || []);
         const payment = asAmount(details.initialPaymentAmount) ?? asAmount(payload.paymentAmount) ?? 0n;
-        const pairsSold = readSaleQuantity(payload, event.driver?.products || []);
+        const pairsSold = readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
         bucket.salesCount += pairsSold;
         bucket.salesAmount += sale;
         bucket.receivedAmount += payment;
@@ -192,7 +202,7 @@ export class DashboardService {
       for (const draftRow of confirmedDrafts) {
         if (firstConfirmationByDriver.has(draftRow.driverId)) continue;
         const payload = asObject(draftRow.payload);
-        if (payload.paymentReceivedConfirmed !== true) continue;
+        if (!hasConfirmedInitialPayment(payload)) continue;
         firstConfirmationByDriver.add(draftRow.driverId);
         const paymentKey = typeof payload.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.paymentDate)
           ? payload.paymentDate : dateKey(draftRow.driver.createdAt);
@@ -202,7 +212,7 @@ export class DashboardService {
         if (!bucket) continue;
         const sale = readSaleAmount(payload, draftRow.driver.products);
         const payment = asAmount(payload.paymentAmount) ?? 0n;
-        const pairsSold = readSaleQuantity(payload, draftRow.driver.products);
+        const pairsSold = readConfirmedSaleQuantity({}, payload, draftRow.driver.products);
         bucket.salesCount += pairsSold;
         bucket.salesAmount += sale;
         bucket.receivedAmount += payment;
@@ -282,7 +292,9 @@ export class DashboardService {
         })),
         dueItems: [...overdueItems, ...upcomingItems].map((item) => ({
           id: item.id, driverId: item.driver.id, driverName: item.driver.fullName, number: item.number,
-          amount: String(item.amount), dueAt: item.dueAt, overdue: dateKey(item.dueAt) < today,
+          amount: String(item.amount), dueAt: item.dueAt,
+          overdue: dateKey(item.dueAt) < today,
+          dueSoon: dateKey(item.dueAt) >= today && dateKey(item.dueAt) <= shiftDay(today, 3),
         })),
         activity: activity.map((item) => ({ id: item.id, eventType: item.eventType, createdAt: item.createdAt,
           driverId: item.driver?.id || null, driverName: item.driver?.fullName || null, actorName: item.actor?.name || null,
@@ -312,7 +324,7 @@ export class DashboardService {
       if (date < firstDay || date >= endExclusive) continue;
       const bucket = buckets.get(granularity === 'daily' ? date : monthKey(date));
       const payload = asObject(event.driver?.drafts[0]?.payload);
-      if (bucket) bucket.salesCount += readSaleQuantity(payload, event.driver?.products || []);
+      if (bucket) bucket.salesCount += readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
     }
     const confirmedDrafts = await this.prisma.stageDraft.findMany({
       where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION },
@@ -321,13 +333,13 @@ export class DashboardService {
     for (const draftRow of confirmedDrafts) {
       if (countedDrivers.has(draftRow.driverId)) continue;
       const payload = asObject(draftRow.payload);
-      if (payload.paymentReceivedConfirmed !== true) continue;
+      if (!hasConfirmedInitialPayment(payload)) continue;
       countedDrivers.add(draftRow.driverId);
       const date = typeof payload.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.paymentDate)
         ? payload.paymentDate : dateKey(draftRow.driver.createdAt);
       if (date < firstDay || date >= endExclusive) continue;
       const bucket = buckets.get(granularity === 'daily' ? date : monthKey(date));
-      if (bucket) bucket.salesCount += readSaleQuantity(payload, draftRow.driver.products);
+      if (bucket) bucket.salesCount += readConfirmedSaleQuantity({}, payload, draftRow.driver.products);
     }
     const rows = keys.map((key) => ({ ...buckets.get(key)!, labelKey: key }));
     return {

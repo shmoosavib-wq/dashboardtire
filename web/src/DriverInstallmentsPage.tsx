@@ -34,6 +34,12 @@ function isOverdue(installment: Installment, today: string) {
   return !installment.paidAt && isoDate(installment.dueAt) < today;
 }
 
+function isDueSoon(installment: Installment, today: string) {
+  if (installment.paidAt) return false;
+  const daysUntilDue = (Date.parse(`${isoDate(installment.dueAt)}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000;
+  return daysUntilDue >= 0 && daysUntilDue <= 3;
+}
+
 function RecordPaymentModal({ driver, installment, onClose, onSaved }: {
   driver: InstallmentDriver; installment: Installment; onClose: () => void; onSaved: (paidAt: string) => Promise<void>;
 }) {
@@ -164,21 +170,24 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
 
     {loading ? <div className="installment-loading"><LoadingIndicator label="در حال دریافت فهرست اقساط…" /></div>
       : loadError ? <div className="empty-state installment-empty"><p>{loadError}</p><button type="button" className="btn" onClick={() => void load()}>تلاش دوباره</button></div>
-        : !filteredDrivers.length ? <div className="empty-state installment-empty"><strong>{drivers.length ? 'موردی با این فیلتر پیدا نشد.' : 'هنوز برنامهٔ قسطی ثبت نشده است.'}</strong><p>{drivers.length ? 'فیلتر یا عبارت جستجو را تغییر دهید.' : 'پس از تأیید پرداخت اولیه، برنامهٔ سه‌قسطی به‌صورت خودکار اینجا نمایش داده می‌شود.'}</p></div>
+        : !filteredDrivers.length ? <div className="empty-state installment-empty"><strong>{drivers.length ? 'موردی با این فیلتر پیدا نشد.' : 'هنوز برنامهٔ قسطی ثبت نشده است.'}</strong><p>{drivers.length ? 'فیلتر یا عبارت جستجو را تغییر دهید.' : 'پس از تأیید پرداخت اولیه، سه قسط ماهانهٔ بعدی به‌صورت خودکار اینجا نمایش داده می‌شود.'}</p></div>
           : <div className="table-wrap installment-table-wrap"><table className="data-table installment-driver-table">
             <thead><tr><th>#</th><th>راننده</th><th>کالا</th><th>پرداخت اولیه</th><th>تعداد اقساط</th><th>وضعیت</th><th>جزئیات</th></tr></thead>
             <tbody>{filteredDrivers.map((driver, index) => {
               const overdue = driver.installments.some((item) => isOverdue(item, today));
-              const paidCount = driver.installments.filter((item) => item.paidAt).length;
+              const dueSoon = !overdue && driver.installments.some((item) => isDueSoon(item, today));
+              const initialPaymentPaid = Boolean(driver.initialPaymentAmount && BigInt(driver.initialPaymentAmount) > 0n);
+              const paidCount = driver.installments.filter((item) => item.paidAt).length + Number(initialPaymentPaid);
+              const totalPaymentCount = driver.installments.length + Number(initialPaymentPaid);
               const expanded = expandedId === driver.id;
               return <Fragment key={driver.id}>
-                <tr className={overdue ? 'installment-driver-row has-overdue' : 'installment-driver-row'}>
+                <tr className={`installment-driver-row${overdue ? ' has-overdue' : dueSoon ? ' has-due-soon' : ''}`}>
                   <td className="row-number">{faNumber(index + 1)}</td>
                   <td><div className="installment-driver-name"><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.archivedAt && <span className="archive-tag">آرشیو</span>}</small></div></td>
                   <td className="installment-products">{driver.products.length ? driver.products.map((item) => `${item.title} (${faNumber(item.quantity)})`).join('، ') : '—'}</td>
                   <td>{driver.initialPaymentAmount ? <><strong>{formatMoney(driver.initialPaymentAmount)} تومان</strong><small className="installment-subdate">{displayInstallmentDate(driver.initialPaymentDate)}</small></> : '—'}</td>
-                  <td>{driver.needsPlan ? 'برنامه ثبت نشده' : <>{faNumber(paidCount)} از {faNumber(driver.installments.length)} پرداخت‌شده</>}</td>
-                  <td>{driver.needsPlan ? <span className="status-pill">نیازمند ساخت برنامه</span> : overdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : paidCount === driver.installments.length ? <span className="status-pill success">تکمیل‌شده</span> : <span className="status-pill">در جریان</span>}</td>
+                  <td>{driver.needsPlan ? 'برنامه ثبت نشده' : <>{faNumber(paidCount)} از {faNumber(totalPaymentCount)} پرداخت‌شده</>}</td>
+                  <td>{driver.needsPlan ? <span className="status-pill">نیازمند ساخت برنامه</span> : overdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : dueSoon ? <span className="installment-status due-soon"><i className="due-soon-pulse" />سررسید نزدیک</span> : paidCount === totalPaymentCount ? <span className="status-pill success">تکمیل‌شده</span> : <span className="status-pill">در جریان</span>}</td>
                   <td>{driver.needsPlan
                     ? <button type="button" className="btn small primary" disabled={creatingPlanId !== null} onClick={() => void createPlan(driver)}>{creatingPlanId === driver.id ? 'در حال ساخت…' : 'ساخت برنامه'}</button>
                     : <button type="button" className="btn small installment-expand" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : driver.id)}>{expanded ? 'بستن جزئیات' : 'مشاهده اقساط'}<span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>}</td>
@@ -188,9 +197,10 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
                   <div className="table-wrap installment-child-wrap"><table className="data-table installment-child-table"><thead><tr><th>قسط</th><th>مبلغ</th><th>تاریخ سررسید</th><th>تاریخ پرداخت واقعی</th><th>وضعیت</th><th>اقدام</th></tr></thead>
                     <tbody>{driver.installments.map((item) => {
                       const itemOverdue = isOverdue(item, today);
-                      return <tr key={item.id} className={itemOverdue ? 'installment-child-overdue' : ''}>
+                      const itemDueSoon = !itemOverdue && isDueSoon(item, today);
+                      return <tr key={item.id} className={itemOverdue ? 'installment-child-overdue' : itemDueSoon ? 'installment-child-due-soon' : ''}>
                         <td>قسط {faNumber(item.number)}</td><td><strong>{formatMoney(item.amount)} تومان</strong></td><td>{displayInstallmentDate(item.dueAt)}</td><td>{item.paidAt ? displayInstallmentDate(item.paidAt) : <span className="installment-not-recorded">ثبت نشده</span>}</td>
-                        <td>{item.paidAt ? <span className="status-pill success">پرداخت‌شده</span> : itemOverdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : <span className="status-pill">پرداخت‌نشده</span>}</td>
+                        <td>{item.paidAt ? <span className="status-pill success">پرداخت‌شده</span> : itemOverdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : itemDueSoon ? <span className="installment-status due-soon"><i className="due-soon-pulse" />سررسید نزدیک</span> : <span className="status-pill">پرداخت‌نشده</span>}</td>
                         <td>{item.paidAt ? <button type="button" className="btn small" onClick={() => setPaymentTarget({ driver, installment: item })}>ویرایش تاریخ</button> : <button type="button" className="btn small primary" onClick={() => setPaymentTarget({ driver, installment: item })}>ثبت پرداخت</button>}</td>
                       </tr>;
                     })}</tbody></table></div>

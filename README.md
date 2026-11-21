@@ -64,7 +64,7 @@ npm run dev:web
 
 ## میزبانی بعدی
 
-نشانی production اعلام‌شده برای سامانه `https://sabadashboard.liara.run/` است. تنظیمات پایهٔ Liara در `liara.json` قرار دارد، اما build/start commandها، متغیرهای محیطی و اتصال storage باید در پنل میزبان هم تنظیم شوند. جزئیات استقرار، نیازهای دیتابیس و فضای خصوصی فایل در [راهنمای تداوم پروژه](docs/project-guide.md) آمده است. تنظیمات Render در `render.yaml` برای staging هستند و نباید بدون بازبینی به production منتقل شوند.
+نشانی اصلی سامانه `https://backoffice.sababar.com/` است. دامنهٔ قبلی Liara موقت بوده است. تنظیمات پایهٔ Liara در `liara.json` قرار دارد، اما build/start commandها، متغیرهای محیطی و اتصال storage باید در پنل میزبان هم تنظیم شوند. جزئیات استقرار، نیازهای دیتابیس و فضای خصوصی فایل در [راهنمای تداوم پروژه](docs/project-guide.md) آمده است. تنظیمات Render در `render.yaml` برای staging هستند و نباید بدون بازبینی به production منتقل شوند.
 # Local workflow smoke test
 
 With the local PostgreSQL, API, and web app running, execute:
