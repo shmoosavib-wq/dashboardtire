@@ -620,6 +620,7 @@ html[data-theme="dark"] .archive-tag{background:#2a3945;color:#bbc6ce}
 .installment-driver-table th:nth-child(1){width:4%}.installment-driver-table th:nth-child(2){width:16%}.installment-driver-table th:nth-child(3){width:19%}.installment-driver-table th:nth-child(4){width:15%}.installment-driver-table th:nth-child(5){width:15%}.installment-driver-table th:nth-child(6){width:15%}.installment-driver-table th:nth-child(7){width:16%}
 .installment-table-wrap,.installment-child-wrap{min-width:0;max-width:100%;overflow-x:hidden}
 .installment-driver-table td,.installment-child-table td{min-width:0;overflow-wrap:anywhere}
+.installment-driver-table td.row-number{width:64px;min-width:64px;white-space:nowrap;overflow-wrap:normal;direction:ltr;text-align:center}
 .installment-child-table th{padding-inline:8px;white-space:normal}
 .installment-child-table td{padding-inline:8px;white-space:normal}
 .installment-child-table th:nth-child(1){width:10%}.installment-child-table th:nth-child(2){width:19%}.installment-child-table th:nth-child(3){width:15%}.installment-child-table th:nth-child(4){width:20%}.installment-child-table th:nth-child(5){width:16%}.installment-child-table th:nth-child(6){width:20%}

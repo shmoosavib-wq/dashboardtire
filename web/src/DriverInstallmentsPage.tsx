@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } f
 import { api, displayDate, faDigits, faNumber, formatMoney, jsonBody } from './api';
 import LoadingIndicator from './LoadingIndicator';
 import PersianDatePicker from './driver-panel/PersianDatePicker';
+import TablePagination from './TablePagination';
 
 type Installment = { id: string; number: number; amount: string; dueAt: string; paidAt: string | null; paidBy: { id: string; name: string } | null };
 type InstallmentDriver = {
@@ -87,6 +88,8 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [paymentTarget, setPaymentTarget] = useState<{ driver: InstallmentDriver; installment: Installment } | null>(null);
   const [today, setToday] = useState(tehranToday);
   const [creatingPlanId, setCreatingPlanId] = useState<string | null>(null);
@@ -122,6 +125,11 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
       return matchesSearch && (filter === 'all' || (filter === 'unpaid' && hasUnpaid) || (filter === 'paid' && allPaid));
     });
   }, [drivers, filter, search, today]);
+
+  useEffect(() => { setPage(1); }, [filter, search]);
+  const totalPages = Math.max(1, Math.ceil(filteredDrivers.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageDrivers = filteredDrivers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   async function savePayment(paidAt: string) {
     if (!paymentTarget) return;
@@ -173,7 +181,7 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
         : !filteredDrivers.length ? <div className="empty-state installment-empty"><strong>{drivers.length ? 'موردی با این فیلتر پیدا نشد.' : 'هنوز برنامهٔ قسطی ثبت نشده است.'}</strong><p>{drivers.length ? 'فیلتر یا عبارت جستجو را تغییر دهید.' : 'پس از تأیید پرداخت اولیه، سه قسط ماهانهٔ بعدی به‌صورت خودکار اینجا نمایش داده می‌شود.'}</p></div>
           : <div className="table-wrap installment-table-wrap"><table className="data-table installment-driver-table">
             <thead><tr><th>#</th><th>راننده</th><th>کالا</th><th>پرداخت اولیه</th><th>تعداد اقساط</th><th>وضعیت</th><th>جزئیات</th></tr></thead>
-            <tbody>{filteredDrivers.map((driver, index) => {
+            <tbody>{pageDrivers.map((driver, index) => {
               const overdue = driver.installments.some((item) => isOverdue(item, today));
               const dueSoon = !overdue && driver.installments.some((item) => isDueSoon(item, today));
               const initialPaymentPaid = Boolean(driver.initialPaymentAmount && BigInt(driver.initialPaymentAmount) > 0n);
@@ -182,7 +190,7 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
               const expanded = expandedId === driver.id;
               return <Fragment key={driver.id}>
                 <tr className={`installment-driver-row${overdue ? ' has-overdue' : dueSoon ? ' has-due-soon' : ''}`}>
-                  <td className="row-number">{faNumber(index + 1)}</td>
+                  <td className="row-number">{faNumber((currentPage - 1) * pageSize + index + 1)}</td>
                   <td><div className="installment-driver-name"><strong>{driver.fullName}</strong><small>{faDigits(driver.mobile)}{driver.archivedAt && <span className="archive-tag">آرشیو</span>}</small></div></td>
                   <td className="installment-products">{driver.products.length ? driver.products.map((item) => `${item.title} (${faNumber(item.quantity)})`).join('، ') : '—'}</td>
                   <td>{driver.initialPaymentAmount ? <><strong>{formatMoney(driver.initialPaymentAmount)} تومان</strong><small className="installment-subdate">{displayInstallmentDate(driver.initialPaymentDate)}</small></> : '—'}</td>
@@ -208,6 +216,7 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
               </Fragment>;
             })}</tbody>
           </table></div>}
+    {!loading && !loadError && filteredDrivers.length > 0 && <TablePagination page={currentPage} pageSize={pageSize} total={filteredDrivers.length} itemLabel="راننده" onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size); }} />}
     {paymentTarget && <RecordPaymentModal driver={paymentTarget.driver} installment={paymentTarget.installment} onClose={() => setPaymentTarget(null)} onSaved={savePayment} />}
   </div>;
 }
