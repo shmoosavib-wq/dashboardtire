@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { api, asciiDigits, faDigits, faNumber, jsonBody } from './api';
+import { api, asciiDigits, faDigits, faNumber, formatMoney, jsonBody } from './api';
 import { can, stageList, type Driver, type Stage, type User } from './model';
 import LoadingIndicator from './LoadingIndicator';
 import TablePagination from './TablePagination';
@@ -100,8 +100,11 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
   const visibleStages = useMemo(() => stageList, []);
   const selectedStageName = selectedStage === 'COMPLETED' ? 'تکمیل‌شده' : visibleStages.find((item) => item.id === selectedStage)?.compact;
   const contractStageIndex = visibleStages.findIndex((item) => item.id === 'CONTRACT_CHEQUE');
+  const proformaStageIndex = visibleStages.findIndex((item) => item.id === 'PROFORMA_PAYMENT_RESERVATION');
   const stagePosition = (stage: Stage) => stage === 'COMPLETED' ? visibleStages.length : visibleStages.findIndex((item) => item.id === stage);
   const showContractNumber = mode === 'flow' && (!selectedStage || stagePosition(selectedStage) >= contractStageIndex);
+  const selectedStageHasSalePrice = mode === 'flow' && !!selectedStage && stagePosition(selectedStage) >= proformaStageIndex;
+  const trackingColumnTitle = selectedStageHasSalePrice ? 'مبلغ کل کالا' : selectedStage ? 'مسئول پیگیری' : 'پیگیری / مبلغ کالا';
   const columnCount = showContractNumber ? 8 : 7;
   const totalPages = Math.max(1, Math.ceil(drivers.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -125,7 +128,7 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
       {error && <div className="alert error">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
       <div className="table-wrap">
         <table className={`data-table mobile-card-table driver-table${showContractNumber ? ' has-contract-number' : ''}`}>
-          <thead><tr><th>#</th><th>راننده</th><th>کد ملی</th><th>کالا</th>{showContractNumber && <th>شماره قرارداد</th>}<th>وضعیت اقدام</th><th>مسئول پیگیری</th><th>اقدام</th></tr></thead>
+          <thead><tr><th>#</th><th>راننده</th><th>کد ملی</th><th>کالا</th>{showContractNumber && <th>شماره قرارداد</th>}<th>وضعیت اقدام</th><th className={selectedStageHasSalePrice ? 'sale-price-heading' : ''}>{trackingColumnTitle}</th><th>اقدام</th></tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={columnCount}><div className="empty-state"><LoadingIndicator label="در حال دریافت پرونده‌ها…" compact /></div></td></tr>
               : drivers.length === 0 ? <tr><td colSpan={columnCount}><div className="empty-state"><div className="empty-mark">⌕</div><b>{search ? 'نتیجه‌ای پیدا نشد' : mode === 'archive' ? 'آرشیو خالی است' : selectedStage ? `پرونده‌ای در مرحلهٔ «${selectedStageName}» نیست` : 'هنوز پرونده‌ای ثبت نشده'}</b><span>{search ? 'نام، شماره موبایل یا کد ملی دیگری را جستجو کنید.' : selectedStage ? 'برای دیدن سایر پرونده‌ها، همهٔ مراحل را انتخاب کنید.' : 'با ثبت متقاضی، پروندهٔ راننده وارد گردش فروش می‌شود.'}</span>{selectedStage && <button className="btn subtle" onClick={() => onStageChange('')}>نمایش همهٔ مراحل</button>}{canCreate && !search && !selectedStage && <button className="btn subtle" onClick={() => setShowCreate(true)}>ثبت متقاضی</button>}</div></td></tr>
@@ -136,7 +139,9 @@ export default function DriversPage({ mode, user, notify, onOpen, refreshToken, 
                   <td data-label="کالا"><span className="driver-product-name">{driver.proformaProducts?.join('، ') || driver.products?.map((product) => product.title).filter(Boolean).join('، ') || driver.productHint || '—'}</span></td>
                   {showContractNumber && <td data-label="شماره قرارداد">{stagePosition(driver.currentStage) >= contractStageIndex ? driver.contractNumber || '—' : '—'}</td>}
                   <td data-label="وضعیت اقدام"><span className={'status-pill ' + (driver.stageStatus === 'COMPLETED' ? 'success' : driver.stageStatus.includes('REJECTED') ? 'warning' : '')}>{statusNames[driver.stageStatus] || statusNames[driver.currentStage] || driver.stageStatus}</span></td>
-                  <td className="responsible-cell" data-label="مسئول پیگیری">{responsible[driver.currentStage]}</td>
+                  {stagePosition(driver.currentStage) >= proformaStageIndex
+                    ? <td className="driver-price-cell" data-label="مبلغ کل کالا">{driver.saleAmount ? <><strong>{formatMoney(driver.saleAmount)}</strong><small>تومان</small></> : '—'}</td>
+                    : <td className="responsible-cell" data-label="مسئول پیگیری">{responsible[driver.currentStage]}</td>}
                   <td data-label="اقدام"><div className="row-actions">{mode === 'archive' && can(user, 'SUPER_ADMIN') && <button className="btn small subtle" disabled={restoringId === driver.id} onClick={() => void restoreArchivedDriver(driver)}>{restoringId === driver.id ? 'در حال بازگردانی…' : 'بازگردانی به گردش'}</button>}{mode === 'flow' && (driver.currentStage === 'COMPLETED'
                     ? can(user, 'SALES_OPERATIONS', 'LEGAL_FINANCE') && <button className="btn small subtle" disabled={returnBusy} onClick={() => { setReturnError(''); setReturnTarget(driver); }}>بازگشت <span>↶</span></button>
                     : <button className="btn small row-action" onClick={() => onOpen(driver.id, 'flow')}>اقدام <span>←</span></button>)}<button className="btn small" onClick={() => onOpen(driver.id, 'dossier')}>مشاهده پرونده</button></div></td>

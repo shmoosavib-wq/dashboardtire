@@ -652,16 +652,20 @@ body{font-size:15px;line-height:1.6}
 .driver-table th:nth-child(3),.driver-table td:nth-child(3){width:11%}
 .driver-table th:nth-child(4),.driver-table td:nth-child(4){width:14%}
 .driver-table th:nth-child(5),.driver-table td:nth-child(5){width:12%}
-.driver-table th:nth-child(6),.driver-table td:nth-child(6){width:11%}
-.driver-table th:nth-child(7),.driver-table td:nth-child(7){width:31%;min-width:0}
+.driver-table th:nth-child(6),.driver-table td:nth-child(6){width:15%}
+.driver-table th:nth-child(7),.driver-table td:nth-child(7){width:27%;min-width:0}
 .driver-table.has-contract-number th:nth-child(1),.driver-table.has-contract-number td:nth-child(1){width:4%}
 .driver-table.has-contract-number th:nth-child(2),.driver-table.has-contract-number td:nth-child(2){width:16%}
 .driver-table.has-contract-number th:nth-child(3),.driver-table.has-contract-number td:nth-child(3){width:10%}
 .driver-table.has-contract-number th:nth-child(4),.driver-table.has-contract-number td:nth-child(4){width:13%}
 .driver-table.has-contract-number th:nth-child(5),.driver-table.has-contract-number td:nth-child(5){width:12%}
 .driver-table.has-contract-number th:nth-child(6),.driver-table.has-contract-number td:nth-child(6){width:12%}
-.driver-table.has-contract-number th:nth-child(7),.driver-table.has-contract-number td:nth-child(7){width:11%}
-.driver-table.has-contract-number th:nth-child(8),.driver-table.has-contract-number td:nth-child(8){width:22%;min-width:0}
+.driver-table.has-contract-number th:nth-child(7),.driver-table.has-contract-number td:nth-child(7){width:15%}
+.driver-table.has-contract-number th:nth-child(8),.driver-table.has-contract-number td:nth-child(8){width:18%;min-width:0}
+.driver-price-cell{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text)!important;text-align:center!important;vertical-align:middle}
+.driver-price-cell strong{font-size:12px;font-weight:700}
+.driver-price-cell small{display:block;color:var(--muted);font-size:10px}
+.sale-price-heading{text-align:center!important}
 .driver-table td:nth-child(2){white-space:normal}
 .driver-table td:nth-child(4){white-space:normal;overflow-wrap:anywhere}
 .driver-table .driver-cell{min-width:0}

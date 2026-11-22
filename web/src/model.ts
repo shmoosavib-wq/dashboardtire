@@ -13,6 +13,7 @@ export type Driver = {
   id: string; fullName: string; mobile: string; nationalId?: string | null; currentStage: Stage; stageStatus: string;
   productHint?: string | null; archivedAt?: string | null; archiveReason?: string | null;
   proformaProducts?: string[]; contractNumber?: string | null;
+  saleAmount?: string | null;
   createdAt: string; updatedAt: string; createdBy?: { name: string };
   drafts?: Draft[]; documents?: Document[]; auditEvents?: AuditEvent[];
   products?: ProductLine[];

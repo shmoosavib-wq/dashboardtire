@@ -200,18 +200,30 @@ export class DriversService {
       orderBy: { updatedAt: 'desc' },
       include: {
         createdBy: { select: { id: true, name: true } },
-        products: { select: { title: true, quantity: true } },
+        products: { select: { title: true, quantity: true, saleUnitPrice: true } },
         drafts: { where: { stage: { in: ['PROFORMA_PAYMENT_RESERVATION', 'CONTRACT_CHEQUE'] } }, select: { stage: true, payload: true } },
         _count: { select: { documents: { where: { deletedAt: null } }, auditEvents: true } },
       },
     });
     return drivers.map(({ drafts, ...driver }) => {
-      const proformaPayload = drafts.find((draft) => draft.stage === 'PROFORMA_PAYMENT_RESERVATION')?.payload as { products?: { title?: unknown }[] } | undefined;
+      const proformaPayload = drafts.find((draft) => draft.stage === 'PROFORMA_PAYMENT_RESERVATION')?.payload as { products?: { title?: unknown; quantity?: unknown; saleUnitPrice?: unknown }[] } | undefined;
       const contractPayload = drafts.find((draft) => draft.stage === 'CONTRACT_CHEQUE')?.payload as { contractNumber?: unknown } | undefined;
-      const proformaProducts = Array.isArray(proformaPayload?.products)
-        ? proformaPayload.products.map((product) => typeof product.title === 'string' ? product.title.trim() : '').filter(Boolean)
-        : [];
-      return { ...driver, proformaProducts, contractNumber: typeof contractPayload?.contractNumber === 'string' ? contractPayload.contractNumber : null };
+      const listProducts: { title: string; quantity: number; saleUnitPrice: string | null }[] = driver.products.length ? driver.products.map((product) => ({
+        title: product.title,
+        quantity: product.quantity,
+        saleUnitPrice: product.saleUnitPrice === null ? null : String(product.saleUnitPrice),
+      })) : Array.isArray(proformaPayload?.products) ? proformaPayload.products.map((product) => ({
+        title: typeof product.title === 'string' ? product.title.trim() : '',
+        quantity: Number(product.quantity) || 0,
+        saleUnitPrice: typeof product.saleUnitPrice === 'string' || typeof product.saleUnitPrice === 'number' ? String(product.saleUnitPrice) : null,
+      })) : [];
+      const hasPricedProducts = listProducts.length > 0 && listProducts.every((product) =>
+        Number.isSafeInteger(product.quantity) && product.quantity > 0 && /^\d+$/.test(String(product.saleUnitPrice ?? '')));
+      const saleAmount = hasPricedProducts
+        ? listProducts.reduce((sum, product) => sum + BigInt(product.quantity) * BigInt(product.saleUnitPrice!), 0n).toString()
+        : null;
+      const proformaProducts = listProducts.map((product) => product.title).filter(Boolean);
+      return { ...driver, products: listProducts, proformaProducts, saleAmount, contractNumber: typeof contractPayload?.contractNumber === 'string' ? contractPayload.contractNumber : null };
     });
   }
 
