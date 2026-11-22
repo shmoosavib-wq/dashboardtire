@@ -159,6 +159,17 @@ export class DashboardService {
           },
         },
       });
+      const financialCorrections = await this.prisma.auditEvent.findMany({
+        where: { eventType: 'FINANCIAL_PRODUCT_CORRECTED', driverId: { not: null } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { driverId: true, details: true },
+      });
+      const latestCorrectionByDriver = new Map<string, JsonObject>();
+      for (const correction of financialCorrections) {
+        if (correction.driverId && !latestCorrectionByDriver.has(correction.driverId)) {
+          latestCorrectionByDriver.set(correction.driverId, asObject(correction.details));
+        }
+      }
       const firstConfirmationByDriver = new Set<string>();
       let salesCount = 0;
       let salesAmount = 0n;
@@ -175,9 +186,11 @@ export class DashboardService {
         const key = granularity === 'daily' ? paymentKey : monthKey(paymentKey);
         const bucket = buckets.get(key);
         if (!bucket) continue;
-        const sale = asAmount(details.saleAmount) ?? readSaleAmount(payload, event.driver?.products || []);
+        const correction = latestCorrectionByDriver.get(event.driverId);
+        const sale = asAmount(correction?.saleAmount) ?? asAmount(details.saleAmount) ?? readSaleAmount(payload, event.driver?.products || []);
         const payment = asAmount(details.initialPaymentAmount) ?? asAmount(payload.paymentAmount) ?? 0n;
-        const pairsSold = readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
+        const pairsSold = typeof correction?.soldPairs === 'number' && Number.isSafeInteger(correction.soldPairs) && correction.soldPairs >= 0
+          ? correction.soldPairs : readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
         bucket.salesCount += pairsSold;
         bucket.salesAmount += sale;
         bucket.receivedAmount += payment;

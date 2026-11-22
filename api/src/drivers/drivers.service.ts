@@ -262,7 +262,7 @@ export class DriversService {
         drafts: { orderBy: { stage: 'asc' }, include: { updatedBy: { select: { id: true, name: true } } } },
         documents: { where: { deletedAt: null }, orderBy: { uploadedAt: 'desc' }, include: { uploadedBy: { select: { id: true, name: true } } } },
         auditEvents: { orderBy: { createdAt: 'desc' }, take: 250, include: { actor: { select: { id: true, name: true } } } },
-        products: true,
+        products: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
         storeSettlement: true,
         installments: { orderBy: { number: 'asc' }, include: { paidBy: { select: { id: true, name: true } } } },
       },
@@ -307,7 +307,26 @@ export class DriversService {
           const next = profilePatch[key];
           return (driver as unknown as Record<string, unknown>)[key] !== next;
         });
-        const changedKeys = [...Object.keys(patch).filter((key) => JSON.stringify(previous[key]) !== JSON.stringify(patch[key])), ...changedProfileKeys];
+        let changedKeys = [...Object.keys(patch).filter((key) => key !== 'products' && JSON.stringify(previous[key]) !== JSON.stringify(patch[key])), ...changedProfileKeys];
+        let productsToPersist: ReturnType<DriversService['cleanProducts']> | null = null;
+        if (input.stage === 'PROFORMA_PAYMENT_RESERVATION' && Array.isArray(patch.products)) {
+          const canonical = await tx.driverProduct.findMany({ where: { driverId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { title: true, quantity: true, saleUnitPrice: true, supplyUnitCost: true } });
+          const complete = patch.products.length > 0 && patch.products.every((item) => {
+            const row = item as Record<string, unknown>;
+            return Boolean(String(row.title || '').trim()) && Number(row.quantity) > 0 && Number(row.saleUnitPrice) > 0 && Number(row.supplyUnitCost) > 0;
+          });
+          if (canonical.length || complete) {
+            productsToPersist = this.cleanProducts(patch.products);
+            const matches = canonical.length === productsToPersist.length && canonical.every((row, index) => {
+              const next = productsToPersist![index];
+              return row.title === next.title && row.quantity === next.quantity && row.saleUnitPrice?.toString() === String(next.saleUnitPrice) && row.supplyUnitCost?.toString() === String(next.supplyUnitCost);
+            });
+            if (!matches || Object.prototype.hasOwnProperty.call(previous, 'products')) changedKeys.push('products');
+            delete merged.products;
+          } else if (JSON.stringify(previous.products) !== JSON.stringify(patch.products)) {
+            changedKeys.push('products');
+          }
+        }
         if (!changedKeys.length) return current;
         const installmentInputsChanged = input.stage === 'PROFORMA_PAYMENT_RESERVATION'
           && changedKeys.some((key) => ['products', 'paymentAmount', 'paymentDate'].includes(key));
@@ -316,34 +335,42 @@ export class DriversService {
         if (installmentInputsChanged) {
           const existingInstallments = await tx.driverInstallment.findMany({
             where: { driverId: id },
-            select: { amount: true, paidAt: true },
+            orderBy: { number: 'asc' },
+            select: { id: true, number: true, amount: true, dueAt: true, paidAt: true, paidById: true },
           });
           if (existingInstallments.length) {
-            if (existingInstallments.some((installment) => installment.paidAt)) {
-              throw new ConflictException('پس از ثبت پرداخت قسط، اطلاعات مالی پرونده قابل ویرایش نیست؛ برای اصلاح اقساط با امور مالی هماهنگ کنید.');
-            }
             priorInstallmentTotal = existingInstallments.reduce((sum, installment) => sum + installment.amount, 0n);
             const productsWereEdited = changedKeys.includes('products');
-            const savedProducts = tx.driverProduct
-              ? await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } })
-              : [];
+            const savedProducts = await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
             let products: { quantity: number; saleUnitPrice: bigint | number | null }[];
-            if (productsWereEdited && Array.isArray(merged.products)) {
-              products = this.cleanProducts(merged.products).map((product) => ({
-                quantity: product.quantity,
-                saleUnitPrice: BigInt(product.saleUnitPrice),
-              }));
+            if (productsWereEdited && productsToPersist) {
+              products = productsToPersist.map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }));
             } else if (savedProducts.length > 0) {
               products = savedProducts;
             } else if (Array.isArray(merged.products) && merged.products.length > 0) {
-              products = this.cleanProducts(merged.products).map((product) => ({
-                quantity: product.quantity,
-                saleUnitPrice: BigInt(product.saleUnitPrice),
-              }));
+              products = this.cleanProducts(merged.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }));
             } else {
               products = savedProducts;
             }
-            recalculatedInstallments = buildInstallmentRows(id, merged.paymentAmount, merged.paymentDate, products);
+            const schedule = buildInstallmentRows(id, merged.paymentAmount, merged.paymentDate, products);
+            const scheduleTotal = schedule.reduce((sum, installment) => sum + installment.amount, 0n);
+            const paidTotal = existingInstallments.reduce((sum, installment) => sum + (installment.paidAt ? installment.amount : 0n), 0n);
+            const unpaid = existingInstallments.filter((installment) => !installment.paidAt);
+            if (paidTotal > scheduleTotal) throw new ConflictException('مجموع اقساط پرداخت‌شده از ماندهٔ جدید بیشتر است؛ اصلاح قیمت با حفظ پرداخت‌های قبلی ممکن نیست.');
+            if (unpaid.length) {
+              const remaining = scheduleTotal - paidTotal;
+              if (remaining < BigInt(unpaid.length)) throw new BadRequestException('ماندهٔ جدید برای تعداد اقساط پرداخت‌نشده کافی نیست.');
+              const base = remaining / BigInt(unpaid.length);
+              const remainder = remaining % BigInt(unpaid.length);
+              recalculatedInstallments = unpaid.map((installment, index) => ({
+                driverId: id,
+                number: installment.number,
+                amount: base + (index === unpaid.length - 1 ? remainder : 0n),
+                dueAt: installment.dueAt,
+              }));
+            } else {
+              recalculatedInstallments = [];
+            }
           }
         }
         if (changedProfileKeys.length) {
@@ -360,6 +387,28 @@ export class DriversService {
           await tx.stageDraft.create({
             data: { driverId: id, stage: input.stage, payload: merged as object, version: 1, updatedById: actor.id },
           });
+        }
+        if (input.stage === 'PROFORMA_PAYMENT_RESERVATION' && changedKeys.includes('products') && productsToPersist) {
+          const corrected = productsToPersist;
+          const existingProducts = await tx.driverProduct.findMany({ where: { driverId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { supplierSettlements: { select: { id: true } } } });
+          if (existingProducts.some((product) => product.supplierSettlements.length) && existingProducts.length !== corrected.length) {
+            throw new ConflictException('به‌دلیل ثبت تسویهٔ تأمین‌کننده، تعداد کالاهای این پرونده قابل تغییر نیست.');
+          }
+          for (const [index, product] of corrected.entries()) {
+            const data = { title: product.title, quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice), supplyUnitCost: BigInt(product.supplyUnitCost) };
+            const existing = existingProducts[index];
+            if (existing) {
+              await tx.driverProduct.update({ where: { id: existing.id }, data });
+              if (existing.supplierSettlements.length) await tx.supplierSettlementRecord.updateMany({ where: { productId: existing.id }, data: { productTitleSnapshot: product.title, quantitySnapshot: product.quantity, saleTotalSnapshot: BigInt(product.saleUnitPrice) * BigInt(product.quantity) } });
+            } else {
+              await tx.driverProduct.create({ data: { driverId: id, ...data } });
+            }
+          }
+          const removed = existingProducts.slice(corrected.length);
+          if (removed.length) await tx.driverProduct.deleteMany({ where: { id: { in: removed.map((product) => product.id) } } });
+          await tx.driver.update({ where: { id }, data: { productHint: corrected.map((product) => product.title).join('، ').slice(0, 160) } });
+          const saleAmount = corrected.reduce((sum, product) => sum + BigInt(product.quantity) * BigInt(product.saleUnitPrice), 0n);
+          await tx.auditEvent.create({ data: { driverId: id, actorId: actor.id, eventType: 'FINANCIAL_PRODUCT_CORRECTED', details: { saleAmount: String(saleAmount), soldPairs: corrected.reduce((sum, product) => sum + product.quantity, 0) } } });
         }
         if (recalculatedInstallments) {
           await tx.driverInstallment.deleteMany({ where: { driverId: id, paidAt: null } });
@@ -538,29 +587,47 @@ export class DriversService {
         data: { currentStage: nextStage, stageStatus: nextStatus },
       });
       if (!changed.count) throw new ConflictException('پرونده هم‌زمان تغییر کرده؛ اطلاعات تازه را دوباره بارگذاری کنید.');
+      const canonicalProductCount = stage === 'PROFORMA_PAYMENT_RESERVATION' ? await tx.driverProduct.count({ where: { driverId: id } }) : 0;
+      const persistedPayload = { ...payload };
+      if (canonicalProductCount) delete persistedPayload.products;
       await tx.stageDraft.upsert({
         where: { driverId_stage: { driverId: id, stage } },
-        create: { driverId: id, stage, payload: payload as object, version: 1, updatedById: actor.id },
-        update: { payload: payload as object, version: { increment: 1 }, updatedById: actor.id },
+        create: { driverId: id, stage, payload: persistedPayload as object, version: 1, updatedById: actor.id },
+        update: { payload: persistedPayload as object, version: { increment: 1 }, updatedById: actor.id },
       });
       if (action === 'SUBMIT_PROFORMA') {
         const products = this.cleanProducts(payload.products);
-        const existingProducts = await tx.driverProduct.count({ where: { driverId: id } });
-        if (existingProducts === 0) await tx.driverProduct.createMany({
-          data: products.map((product) => ({
-            driverId: id,
-            title: product.title,
-            quantity: product.quantity,
-            saleUnitPrice: BigInt(product.saleUnitPrice),
-            supplyUnitCost: BigInt(product.supplyUnitCost),
-          })),
-        });
-        await tx.driver.update({ where: { id }, data: { productHint: products.map((product) => product.title).join('، ').slice(0, 160) } });
+        const existingProducts = await tx.driverProduct.findMany({ where: { driverId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { title: true, quantity: true, saleUnitPrice: true, supplyUnitCost: true } });
+        if (existingProducts.length) {
+          const matches = existingProducts.length === products.length && existingProducts.every((saved, index) => {
+            const submitted = products[index];
+            return saved.title === submitted.title && saved.quantity === submitted.quantity && saved.saleUnitPrice?.toString() === String(submitted.saleUnitPrice) && saved.supplyUnitCost?.toString() === String(submitted.supplyUnitCost);
+          });
+          if (!matches) throw new ConflictException('ابتدا تغییرات کالا را با «ذخیرهٔ موقت» ثبت کنید، سپس پیش‌فاکتور را ارسال کنید.');
+        } else {
+          await tx.driverProduct.createMany({
+            data: products.map((product) => ({
+              driverId: id,
+              title: product.title,
+              quantity: product.quantity,
+              saleUnitPrice: BigInt(product.saleUnitPrice),
+              supplyUnitCost: BigInt(product.supplyUnitCost),
+            })),
+          });
+        }
+        const productTitles = existingProducts.length ? existingProducts.map((product) => product.title) : products.map((product) => product.title);
+        await tx.driver.update({ where: { id }, data: { productHint: productTitles.join('، ').slice(0, 160) } });
+        const savedDraft = await tx.stageDraft.findUnique({ where: { driverId_stage: { driverId: id, stage } } });
+        if (savedDraft?.payload && typeof savedDraft.payload === 'object' && !Array.isArray(savedDraft.payload)) {
+          const cleanPayload = { ...(savedDraft.payload as JsonObject) };
+          delete cleanPayload.products;
+          await tx.stageDraft.update({ where: { id: savedDraft.id }, data: { payload: cleanPayload as object, version: { increment: 1 } } });
+        }
       }
       if (action === 'CONFIRM_INITIAL_PAYMENT') {
-        const products = Array.isArray(payload.products) && payload.products.length > 0
-          ? this.cleanProducts(payload.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) }))
-          : await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
+        const savedProducts = await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
+        const products = savedProducts.length ? savedProducts : Array.isArray(payload.products) && payload.products.length > 0
+          ? this.cleanProducts(payload.products).map((product) => ({ quantity: product.quantity, saleUnitPrice: BigInt(product.saleUnitPrice) })) : [];
         const saleAmount = products.reduce((sum, product) => sum + BigInt(product.quantity) * BigInt(product.saleUnitPrice || 0), 0n);
         financialSnapshot = {
           paymentDate: String(payload.paymentDate),

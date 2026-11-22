@@ -56,6 +56,9 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
       setDriver(value);
       const active = value.drafts?.find((item) => item.stage === value.currentStage);
        const nextPayload = { ...(currentPayload ?? active?.payload ?? {}) };
+       if (value.currentStage === 'PROFORMA_PAYMENT_RESERVATION' && value.products?.length) {
+         nextPayload.products = value.products.map((product) => ({ title: product.title, quantity: String(product.quantity), saleUnitPrice: product.saleUnitPrice ?? '', supplyUnitCost: product.supplyUnitCost ?? '' }));
+       }
        if (value.currentStage === 'PROFORMA_PAYMENT_RESERVATION' && (!Array.isArray(nextPayload.products) || nextPayload.products.length === 0)) nextPayload.products = [emptyProduct()];
        setPayload(nextPayload);
     } catch (reason) {
@@ -91,9 +94,19 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
   function editPreviousStage(stage: Stage) {
     const saved = driver?.drafts?.find((item) => item.stage === stage);
     if (!saved) return;
+    const savedProducts = Array.isArray(saved.payload.products) ? saved.payload.products : [];
+    const products = stage === 'PROFORMA_PAYMENT_RESERVATION' && driver?.products?.length
+      ? driver.products.map((product) => ({
+        title: product.title,
+        quantity: String(product.quantity),
+        saleUnitPrice: product.saleUnitPrice ?? '',
+        supplyUnitCost: product.supplyUnitCost ?? '',
+      }))
+      : savedProducts;
     setEditingStage(stage);
     setEditPayload({
       ...saved.payload,
+      ...(stage === 'PROFORMA_PAYMENT_RESERVATION' ? { products } : {}),
       ...(stage === 'NEED_DECLARED' ? {
         fullName: driver?.fullName || '', mobile: driver?.mobile || '', nationalId: driver?.nationalId || '', productHint: driver?.productHint || '',
       } : {}),
@@ -323,7 +336,7 @@ export default function DriverPanel({ driverId, viewMode, user, notify, onClose,
 function DossierOverview({ driver }: { driver: Driver }) {
   const currentStage = stageList.find((stage) => stage.id === driver.currentStage);
   const draft = driver.drafts?.find((item) => item.stage === 'PROFORMA_PAYMENT_RESERVATION')?.payload || {};
-  const proformaProducts = Array.isArray(draft.products) ? draft.products as Record<string, unknown>[] : [];
+  const proformaProducts = driver.products?.length ? driver.products : Array.isArray(draft.products) ? draft.products as Record<string, unknown>[] : [];
   const proformaSummary = proformaProducts.map((item) => `${String(item.title || 'کالا')} · ${faNumber(String(item.quantity ?? ''))} عدد`).join('، ');
   return <div className="dossier-overview">
     <section className="dossier-status"><div><small>وضعیت فعلی پرونده</small><strong>{currentStage?.title || 'فرایند تکمیل شده'}</strong></div><span className="status-pill">{statusLabel[driver.stageStatus] || statusLabel[driver.currentStage]}</span></section>
