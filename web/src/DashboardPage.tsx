@@ -131,6 +131,21 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
+  const [openKpiTip, setOpenKpiTip] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!openKpiTip) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest('.dash-kpi-info, .dash-kpi-popover')) setOpenKpiTip(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenKpiTip(null); };
+    document.addEventListener('pointerdown', closeOnPointerDown);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [openKpiTip]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -152,6 +167,13 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
   const upcomingItems = data?.dueItems?.filter((item) => !item.overdue) || [];
   const latestUpdate = data?.generatedAt ? displayDateTime(data.generatedAt) : '—';
 
+  const kpiExplanations: Record<string, string> = {
+    cases: 'شمار همهٔ پرونده‌های فروش که هنوز به آرشیو منتقل نشده‌اند؛ پرونده‌های تکمیل‌شده هم تا زمان آرشیو در این عدد می‌مانند. این شاخص لحظه‌ای است و به بازهٔ گزارش وابسته نیست.',
+    sales: 'مجموع تعداد جفت لاستیک در پرونده‌هایی که پیش‌پرداخت اولیه‌شان تأیید شده و تاریخ پرداخت یا تأییدشان داخل بازهٔ انتخاب‌شده است؛ فروش بر اساس جفت شمرده می‌شود، نه تعداد پرونده.',
+    gross: 'برای فروش‌های همین بازه، قیمت واحد هر قلم کالا را در تعدادش ضرب می‌کند و جمع می‌زند. قیمت اصلاح‌شدهٔ کالا لحاظ می‌شود. این رقم ارزش فروش کالاست، نه مبلغ وصول‌شده یا سود خالص.',
+    received: 'جمع پیش‌پرداخت‌های تأییدشده و قسط‌هایی است که تاریخ پرداخت واقعی‌شان در این بازه در سامانه ثبت شده؛ مبلغ اقساطی که فقط سررسید شده‌اند، وصول‌شده محسوب نمی‌شود.',
+    overdue: 'جمع مبلغ قسط‌هایی که هنوز پرداختشان ثبت نشده و تاریخ سررسیدشان قبل از امروز است. مبلغ و تعداد قسط‌ها وضعیت لحظه‌ای‌اند و به بازهٔ گزارش وابسته نیستند.',
+  };
   const kpis = [
     { label: 'پرونده‌های فعال', value: data ? faNumber(data.activeCases) : '—', helper: 'وضعیت همین لحظه', kind: 'cases', glyph: '▣' },
     { label: 'جفت لاستیک فروخته‌شده', value: data ? faNumber(data.totals.salesCount) : '—', helper: periodLabels[period], kind: 'sales', glyph: '↗' },
@@ -180,7 +202,8 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
 
     <section className="dash-kpis" aria-label="شاخص‌های کلیدی">
       {kpis.map((item, index) => <article key={item.kind} className={`dash-kpi ${item.kind}`} style={{ animationDelay: `${index * 55}ms` }}>
-        <div className="dash-kpi-top"><span>{item.label}</span><i aria-hidden="true">{item.glyph}</i></div>
+        <div className="dash-kpi-top"><div className="dash-kpi-label"><span>{item.label}</span><button type="button" className="dash-kpi-info" aria-label={`مبنای محاسبهٔ ${item.label}`} aria-expanded={openKpiTip === item.kind} aria-describedby={openKpiTip === item.kind ? `dash-kpi-tip-${item.kind}` : undefined} onClick={() => setOpenKpiTip((current) => current === item.kind ? null : item.kind)}><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25" /><path d="M10 9v4.2" /><circle cx="10" cy="6.3" r=".65" className="dash-kpi-info-dot" /></svg></button></div><i aria-hidden="true">{item.glyph}</i></div>
+        {openKpiTip === item.kind && <div id={`dash-kpi-tip-${item.kind}`} className="dash-kpi-popover" role="tooltip"><b>مبنای محاسبه</b><span>{kpiExplanations[item.kind]}</span></div>}
         <strong>{loading ? <span className="dash-skeleton" /> : item.value}</strong>
         <small>{item.helper}</small>
       </article>)}
