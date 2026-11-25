@@ -18,12 +18,14 @@ type DashboardResponse = {
     salesCount: number;
     salesAmount: string | null;
     receivedAmount: string | null;
+    supplierPaidAmount: string | null;
+    cashflowNet: string | null;
     nextDueAmount: string | null;
     overdueAmount: string | null;
     overdueCount: number | null;
     nextDueCount: number | null;
   };
-  series: { key: string; labelKey: string; salesCount: number; salesAmount: string | null; receivedAmount: string | null; dueAmount: string | null }[];
+  series: { key: string; labelKey: string; salesCount: number; salesAmount: string | null; receivedAmount: string | null; supplierPaidAmount: string | null; cashflowNet: string | null; dueAmount: string | null }[];
   dueItems: { id: string; driverId: string; driverName: string; number: number; amount: string; dueAt: string; overdue: boolean; dueSoon: boolean }[] | null;
   activity: { id: string; eventType: string; createdAt: string; driverId: string | null; driverName: string | null; actorName: string | null }[];
 };
@@ -43,6 +45,7 @@ const eventTitles: Record<string, string> = {
   WORKFLOW_COMPLETE_DELIVERY: 'تحویل پرونده تکمیل شد',
   INSTALLMENT_PAYMENT_RECORDED: 'پرداخت قسط ثبت شد',
   INSTALLMENT_PAYMENT_UPDATED: 'تاریخ پرداخت قسط اصلاح شد',
+  INSTALLMENT_PAYMENT_AMOUNT_UPDATED: 'مبلغ پرداخت‌شده و ماندهٔ اقساط اصلاح شد',
 };
 
 function localizeKey(key: string, mode: Granularity, full = false) {
@@ -54,6 +57,11 @@ function localizeKey(key: string, mode: Granularity, full = false) {
 
 function amount(value: string | null | undefined): number {
   if (!value || !/^\d+$/.test(value)) return 0;
+  return Number(value);
+}
+
+function signedAmount(value: string | null | undefined): number {
+  if (!value || !/^-?\d+$/.test(value)) return 0;
   return Number(value);
 }
 
@@ -120,6 +128,53 @@ function Chart({ data, metric, granularity, onSelect }: {
   </div>;
 }
 
+function CashflowChart({ data, granularity }: { data: DashboardResponse['series']; granularity: Granularity }) {
+  const width = 1000;
+  const height = 230;
+  const left = 62;
+  const right = 24;
+  const top = 18;
+  const bottom = 30;
+  const max = Math.max(1, ...data.flatMap((item) => [amount(item.receivedAmount), amount(item.supplierPaidAmount), Math.abs(signedAmount(item.cashflowNet))]));
+  const plotWidth = width - left - right;
+  const firstStart = data.length ? bucketBounds(data[0].labelKey, granularity)[0] : 0;
+  const lastEnd = data.length ? bucketBounds(data[data.length - 1].labelKey, granularity)[1] : 1;
+  const timeToX = (time: number) => width - right - ((time - firstStart) / (lastEnd - firstStart || 1)) * plotWidth;
+  const points = data.map((item) => {
+    const [start, end] = bucketBounds(item.labelKey, granularity);
+    return { ...item, x: timeToX((start + end) / 2), slotWidth: timeToX(start) - timeToX(end) };
+  });
+  const maxBarWidth = data.length <= 3 ? 82 : data.length <= 6 ? 58 : data.length <= 12 ? 42 : 30;
+  const tickIndexes = Array.from(new Set([0, Math.floor((data.length - 1) / 3), Math.floor((data.length - 1) * 2 / 3), data.length - 1]));
+  const plotHeight = height - top - bottom;
+  const zeroY = top + plotHeight / 2;
+  return <div className="dash-cashflow-chart-wrap">
+    <svg className="dash-chart dash-cashflow-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="نمودار جریان نقدی شامل وصولی، پرداخت به تأمین‌کننده و خالص نقدینگی" preserveAspectRatio="none">
+      {[-1, -.5, 0, .5, 1].map((ratio) => {
+        const lineY = zeroY - plotHeight / 2 * ratio;
+        return <g key={ratio}><line x1={left} x2={width - right} y1={lineY} y2={lineY} className="dash-grid-line" /><text x={left - 10} y={lineY + 4} textAnchor="end" className="dash-axis-label">{shortMoney(Math.round(max * ratio))}</text></g>;
+      })}
+      <line x1={left} x2={width - right} y1={zeroY} y2={zeroY} className="dash-cashflow-zero" />
+      {points.map((point, index) => {
+        const received = amount(point.receivedAmount);
+        const paid = amount(point.supplierPaidAmount);
+        const net = signedAmount(point.cashflowNet);
+        const groupWidth = Math.min(maxBarWidth, point.slotWidth * 0.72);
+        const barWidth = Math.max(4, groupWidth / 3 - 2);
+        const receivedHeight = plotHeight / 2 * received / max;
+        const paidHeight = plotHeight / 2 * paid / max;
+        const netHeight = plotHeight / 2 * Math.abs(net) / max;
+        return <g key={point.key} className="dash-cashflow-group" style={{ animationDelay: `${Math.min(index, 30) * 8 + 100}ms` }}>
+          <rect className="dash-cashflow-bar received" x={point.x - groupWidth / 2} y={zeroY - receivedHeight} width={barWidth} height={receivedHeight} rx="4"><title>{localizeKey(point.labelKey, granularity, true)} · وصولی {formatMoney(point.receivedAmount || '0')} تومان</title></rect>
+          <rect className="dash-cashflow-bar paid" x={point.x - barWidth / 2} y={zeroY - paidHeight} width={barWidth} height={paidHeight} rx="4"><title>{localizeKey(point.labelKey, granularity, true)} · پرداخت تأمین‌کننده {formatMoney(point.supplierPaidAmount || '0')} تومان</title></rect>
+          <rect className={`dash-cashflow-bar net ${net < 0 ? 'negative' : ''}`} x={point.x + groupWidth / 2 - barWidth} y={net >= 0 ? zeroY - netHeight : zeroY} width={barWidth} height={netHeight} rx="4"><title>{localizeKey(point.labelKey, granularity, true)} · خالص نقدینگی {net < 0 ? '−' : ''}{formatMoney(String(Math.abs(net)))} تومان</title></rect>
+        </g>;
+      })}
+      {tickIndexes.map((index) => <text key={index} x={points[index]?.x ?? 0} y={height - 7} textAnchor="middle" className="dash-axis-label">{localizeKey(data[index]?.labelKey || '', granularity, true)}</text>)}
+    </svg>
+  </div>;
+}
+
 export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
   onOpenStage: (stage: Stage | '') => void;
   onOpenInstallments: () => void;
@@ -166,6 +221,9 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
   const overdueItems = data?.dueItems?.filter((item) => item.overdue) || [];
   const upcomingItems = data?.dueItems?.filter((item) => !item.overdue) || [];
   const latestUpdate = data?.generatedAt ? displayDateTime(data.generatedAt) : '—';
+  const cashflowReceived = useMemo(() => data?.series.reduce((sum, item) => sum + amount(item.receivedAmount), 0) || 0, [data]);
+  const cashflowSupplierPaid = useMemo(() => data?.series.reduce((sum, item) => sum + amount(item.supplierPaidAmount), 0) || 0, [data]);
+  const cashflowNet = cashflowReceived - cashflowSupplierPaid;
 
   const kpiExplanations: Record<string, string> = {
     cases: 'شمار همهٔ پرونده‌های فروش که هنوز به آرشیو منتقل نشده‌اند؛ پرونده‌های تکمیل‌شده هم تا زمان آرشیو در این عدد می‌مانند. این شاخص لحظه‌ای است و به بازهٔ گزارش وابسته نیست.',
@@ -174,6 +232,7 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
     received: 'جمع پیش‌پرداخت‌های تأییدشده و قسط‌هایی است که تاریخ پرداخت واقعی‌شان در این بازه در سامانه ثبت شده؛ مبلغ اقساطی که فقط سررسید شده‌اند، وصول‌شده محسوب نمی‌شود.',
     overdue: 'جمع مبلغ قسط‌هایی که هنوز پرداختشان ثبت نشده و تاریخ سررسیدشان قبل از امروز است. مبلغ و تعداد قسط‌ها وضعیت لحظه‌ای‌اند و به بازهٔ گزارش وابسته نیستند.',
   };
+  kpiExplanations.supplierPaid = 'جمع پرداخت‌های واقعی ثبت‌شده به تأمین‌کنندگان در بازهٔ انتخاب‌شده؛ بدهی ثبت‌شده‌ای که هنوز پرداخت نشده در این عدد وارد نمی‌شود.';
   const kpis = [
     { label: 'پرونده‌های فعال', value: data ? faNumber(data.activeCases) : '—', helper: 'وضعیت همین لحظه', kind: 'cases', glyph: '▣' },
     { label: 'جفت لاستیک فروخته‌شده', value: data ? faNumber(data.totals.salesCount) : '—', helper: periodLabels[period], kind: 'sales', glyph: '↗' },
@@ -182,6 +241,7 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
       { label: 'مبلغ وصول‌شده', value: data.totals.receivedAmount === null ? '—' : formatMoney(data.totals.receivedAmount), helper: `تومان · ${periodLabels[period]}`, kind: 'received', glyph: '✓' },
       { label: 'اقساط معوق', value: data.totals.overdueAmount === null ? '—' : formatMoney(data.totals.overdueAmount), helper: `تومان · وضعیت امروز · ${faNumber(data.totals.overdueCount || 0)} قسط`, kind: 'overdue', glyph: '!' },
     ] : []),
+    ...(data?.hasFinancialAccess ? [{ label: 'تسویه با تأمین‌کننده', value: data.totals.supplierPaidAmount === null ? '—' : formatMoney(data.totals.supplierPaidAmount), helper: `تومان · ${periodLabels[period]}`, kind: 'supplierPaid', glyph: '↔' }] : []),
   ];
 
   return <div className="page-stack dashboard-page">
@@ -237,6 +297,12 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
           {!data?.hasFinancialAccess && <p className="dash-access-note">مبالغ فروش و وصول برای نقش حقوقی و مالی و مدیر سامانه نمایش داده می‌شوند.</p>}
         </>}
     </section>
+
+    {data?.hasFinancialAccess && <section className="dash-section dash-cashflow-section">
+      <div className="dash-section-head dash-chart-head"><div><h2>جریان نقدی</h2><p>مقایسهٔ وصولی واقعی با پرداخت به تأمین‌کنندگان در بازهٔ {periodLabels[period]}</p></div><div className="dash-cashflow-legend" aria-label="راهنمای نمودار"><span className="received"><i />وصولی</span><span className="paid"><i />پرداخت تأمین‌کننده</span><span className="net"><i />خالص نقدینگی</span></div></div>
+      <div className="dash-cashflow-summary"><div><small>وصولی واقعی</small><strong>{formatMoney(String(cashflowReceived))} تومان</strong></div><div><small>پرداخت به تأمین‌کننده</small><strong>{formatMoney(String(cashflowSupplierPaid))} تومان</strong></div><div className={cashflowNet >= 0 ? 'positive' : 'negative'}><small>خالص نقدینگی</small><strong>{cashflowNet < 0 ? '−' : ''}{formatMoney(String(Math.abs(cashflowNet)))} تومان</strong></div></div>
+      <CashflowChart data={data.series} granularity={granularity} />
+    </section>}
 
     <div className="dash-lower-grid">
       {data?.hasFinancialAccess && <section className="dash-section dash-due-section">

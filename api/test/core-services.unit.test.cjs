@@ -134,7 +134,7 @@ test('finance confirmation creates three monthly installments from the remaining
       findUnique: async () => driver,
     },
     stageDraft: { upsert: async ({ update }) => { savedDraftPayload = update.payload; } },
-    driverProduct: { findMany: async () => [{ quantity: 1, saleUnitPrice: 5001n }] },
+    driverProduct: { count: async () => 0, findMany: async () => [{ quantity: 1, saleUnitPrice: 5001n }] },
     driverInstallment: { createMany: async ({ data }) => { createdInstallments = data; return { count: data.length }; } },
     auditEvent: { create: async ({ data }) => auditEvents.push(data) },
   };
@@ -161,13 +161,14 @@ test('finance confirmation creates three monthly installments from the remaining
 });
 
 test('installment plan repair fills missing rows and stays idempotent', async () => {
-  let existingCount = 1;
+  const existingRows = [{ id: 'installment-existing', number: 1, amount: 1000n, paidAt: null }];
   let createArgs;
   const auditEvents = [];
   const tx = {
     driverInstallment: {
-      count: async () => existingCount,
-      createMany: async (args) => { createArgs = args; existingCount = 3; return { count: 2 }; },
+      findMany: async () => existingRows,
+      count: async () => existingRows.length,
+      createMany: async (args) => { createArgs = args; existingRows.push(...args.data); return { count: args.data.length }; },
     },
     stageDraft: { findUnique: async () => ({ payload: { paymentAmount: '2000', paymentDate: '2026-09-23', paymentReceivedConfirmed: true } }) },
     auditEvent: {
@@ -184,7 +185,8 @@ test('installment plan repair fills missing rows and stays idempotent', async ()
   const result = await service.createInstallmentPlan('driver-1', actor('finance', 'LEGAL_FINANCE'));
   assert.deepEqual(result, { created: true, count: 3, totalAmount: '3001' });
   assert.equal(createArgs.skipDuplicates, true);
-  assert.equal(createArgs.data.length, 3);
+  assert.equal(createArgs.data.length, 2);
+  assert.deepEqual(createArgs.data.map(({ number, amount }) => ({ number, amount })), [{ number: 2, amount: 1000n }, { number: 3, amount: 1001n }]);
   assert.equal(auditEvents.length, 1);
 
   const secondResult = await service.createInstallmentPlan('driver-1', actor('finance', 'LEGAL_FINANCE'));
@@ -326,6 +328,7 @@ test('editing confirmed initial payment recalculates unpaid installments in the 
       deleteMany: async (args) => { deletedRows = args; return { count: 3 }; },
       createMany: async ({ data }) => { replacementRows = data; return { count: data.length }; },
     },
+    driverProduct: { findMany: async () => [] },
     auditEvent: { create: async ({ data }) => audits.push(data) },
   };
   const service = new DriversService({
@@ -459,9 +462,9 @@ test('only finance can record an installment payment, stored and audited as a da
   const installment = { id: 'installment-1', driverId: 'driver-1', number: 1, amount: 1000n, paidAt: null };
   const prisma = {
     driver: { findUnique: async () => ({ id: 'driver-1', archivedAt: null }) },
-    driverInstallment: { findFirst: async () => installment },
     $transaction: async (callback) => callback({
       driverInstallment: {
+        findFirst: async () => installment,
         updateMany: async (args) => { updateArgs = args; return { count: 1 }; },
         findUniqueOrThrow: async () => ({ ...installment, paidAt: updateArgs.data.paidAt, paidById: updateArgs.data.paidById }),
       },
@@ -477,6 +480,39 @@ test('only finance can record an installment payment, stored and audited as a da
   await assert.rejects(service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2020-01-02' }, actor('sales', 'SALES_OPERATIONS')), ForbiddenException);
   await assert.rejects(service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2999-01-02' }, actor('finance', 'LEGAL_FINANCE')), BadRequestException);
   await assert.rejects(service.recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2020-01-02T03:04:00.000Z' }, actor('finance', 'LEGAL_FINANCE')), BadRequestException);
+});
+
+test('correcting a paid installment redistributes the unchanged plan total across unpaid installments', async () => {
+  const paidAt = new Date('2020-01-02T12:00:00.000Z');
+  const rows = [
+    { id: 'installment-1', driverId: 'driver-1', number: 1, amount: 1000n, paidAt, dueAt: new Date('2020-01-02T12:00:00.000Z') },
+    { id: 'installment-2', driverId: 'driver-1', number: 2, amount: 1000n, paidAt: null, dueAt: new Date('2020-02-02T12:00:00.000Z') },
+    { id: 'installment-3', driverId: 'driver-1', number: 3, amount: 1000n, paidAt: null, dueAt: new Date('2020-03-02T12:00:00.000Z') },
+  ];
+  let auditEvent;
+  const tx = {
+    driverInstallment: {
+      findFirst: async () => ({ ...rows[0] }),
+      findMany: async () => rows.map((row) => ({ ...row })),
+      update: async ({ where, data }) => { Object.assign(rows.find((row) => row.id === where.id), data); },
+      updateMany: async ({ data }) => { Object.assign(rows[0], data); return { count: 1 }; },
+      findUniqueOrThrow: async () => rows[0],
+    },
+    auditEvent: { create: async ({ data }) => { auditEvent = data; } },
+  };
+  const prisma = {
+    driver: { findUnique: async () => ({ id: 'driver-1' }) },
+    $transaction: async (callback, options) => { assert.equal(options.isolationLevel, 'Serializable'); return callback(tx); },
+  };
+  const result = await new DriversService(prisma).recordInstallmentPayment('driver-1', 'installment-1', { paidAt: '2020-01-02', amount: 1200 }, actor('finance', 'LEGAL_FINANCE'));
+  assert.equal(result.amount, '1200');
+  assert.deepEqual(rows.map((row) => row.amount), [1200n, 900n, 900n]);
+  assert.equal(rows.reduce((sum, row) => sum + row.amount, 0n), 3000n);
+  assert.equal(rows[1].dueAt.toISOString(), '2020-02-02T12:00:00.000Z');
+  assert.equal(rows[2].dueAt.toISOString(), '2020-03-02T12:00:00.000Z');
+  assert.equal(auditEvent.eventType, 'INSTALLMENT_PAYMENT_AMOUNT_UPDATED');
+  assert.equal(auditEvent.details.previousAmount, '1000');
+  assert.equal(auditEvent.details.amount, '1200');
 });
 
 test('document upload rejects a forged PDF signature before writing to storage', async () => {

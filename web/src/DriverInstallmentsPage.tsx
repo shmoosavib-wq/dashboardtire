@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, displayDate, faDigits, faNumber, formatMoney, jsonBody } from './api';
+import { api, asciiDigits, displayDate, faDigits, faNumber, formatMoney, jsonBody, normalizeIntegerInput } from './api';
 import LoadingIndicator from './LoadingIndicator';
 import PersianDatePicker from './driver-panel/PersianDatePicker';
 import TablePagination from './TablePagination';
@@ -42,9 +42,10 @@ function isDueSoon(installment: Installment, today: string) {
 }
 
 function RecordPaymentModal({ driver, installment, onClose, onSaved }: {
-  driver: InstallmentDriver; installment: Installment; onClose: () => void; onSaved: (paidAt: string) => Promise<void>;
+  driver: InstallmentDriver; installment: Installment; onClose: () => void; onSaved: (paidAt: string, amount?: number) => Promise<void>;
 }) {
   const [paidAt, setPaidAt] = useState(installment.paidAt ? isoDate(installment.paidAt) : tehranToday());
+  const [amount, setAmount] = useState(installment.amount);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -54,10 +55,15 @@ function RecordPaymentModal({ driver, installment, onClose, onSaved }: {
       setError('تاریخ پرداخت را انتخاب کنید؛ تاریخ آینده قابل ثبت نیست.');
       return;
     }
+    const numericAmount = Number(asciiDigits(amount).replace(/[^\d]/g, ''));
+    if (installment.paidAt && (!Number.isSafeInteger(numericAmount) || numericAmount < 1 || numericAmount > 1_000_000_000_000_000)) {
+      setError('مبلغ پرداخت‌شده باید عددی مثبت و معتبر باشد.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
-      await onSaved(paidAt);
+      await onSaved(paidAt, installment.paidAt ? numericAmount : undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'ثبت تاریخ پرداخت انجام نشد.');
     } finally {
@@ -68,14 +74,15 @@ function RecordPaymentModal({ driver, installment, onClose, onSaved }: {
   return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
     <section className="modal compact-modal installment-payment-modal" role="dialog" aria-modal="true" aria-labelledby="installment-payment-title">
       <div className="modal-head">
-        <div><div className="eyebrow">ثبت پرداخت قسط {faNumber(installment.number)}</div><h2 id="installment-payment-title">{installment.paidAt ? 'اصلاح تاریخ پرداخت' : 'ثبت پرداخت قسط'}</h2><p>{driver.fullName} · {formatMoney(installment.amount)} تومان</p></div>
+        <div><div className="eyebrow">ثبت پرداخت قسط {faNumber(installment.number)}</div><h2 id="installment-payment-title">{installment.paidAt ? 'اصلاح مبلغ و تاریخ پرداخت' : 'ثبت پرداخت قسط'}</h2><p>{driver.fullName} · {formatMoney(installment.amount)} تومان</p></div>
         <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button>
       </div>
       <div className="installment-payment-context"><span>تاریخ سررسید</span><strong>{displayInstallmentDate(installment.dueAt)}</strong></div>
       <form onSubmit={(event) => void submit(event)}>
+        {installment.paidAt && <label className="field">مبلغ واقعی پرداخت‌شده<input inputMode="numeric" value={formatMoney(amount)} onChange={(event) => setAmount(normalizeIntegerInput(event.target.value))} disabled={busy} aria-label="مبلغ واقعی پرداخت‌شده" /><small>پس از اصلاح، مبلغ قسط‌های پرداخت‌نشده دوباره توزیع می‌شود؛ تاریخ سررسیدشان ثابت می‌ماند.</small></label>}
         <label className="field">تاریخ پرداخت واقعی <PersianDatePicker value={paidAt} onChange={setPaidAt} disabled={busy} /></label>
         {error && <div className="alert error" role="alert">{error}</div>}
-        <div className="modal-actions"><button type="button" className="btn" onClick={onClose} disabled={busy}>انصراف</button><button type="submit" className="btn primary" disabled={busy || !paidAt}>{busy ? 'در حال ثبت…' : 'ذخیره تاریخ پرداخت'}</button></div>
+        <div className="modal-actions"><button type="button" className="btn" onClick={onClose} disabled={busy}>انصراف</button><button type="submit" className="btn primary" disabled={busy || !paidAt}>{busy ? 'در حال ثبت…' : installment.paidAt ? 'ذخیره اصلاحات' : 'ذخیره تاریخ پرداخت'}</button></div>
       </form>
     </section>
   </div>;
@@ -131,14 +138,15 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
   const currentPage = Math.min(page, totalPages);
   const pageDrivers = filteredDrivers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  async function savePayment(paidAt: string) {
+  async function savePayment(paidAt: string, amount?: number) {
     if (!paymentTarget) return;
+    const amountChanged = amount !== undefined && String(amount) !== paymentTarget.installment.amount;
     await api(`/drivers/${paymentTarget.driver.id}/installments/${paymentTarget.installment.id}/payment`, {
-      method: 'POST', body: jsonBody({ paidAt }),
+      method: 'POST', body: jsonBody({ paidAt, ...(amount !== undefined ? { amount } : {}) }),
     });
     setPaymentTarget(null);
     await load();
-    notify('تاریخ پرداخت قسط ثبت شد.');
+    notify(amountChanged ? 'مبلغ پرداخت‌شده اصلاح و ماندهٔ اقساط بازتوزیع شد.' : 'تاریخ پرداخت قسط ثبت شد.');
   }
 
   async function createPlan(driver: InstallmentDriver) {
@@ -209,7 +217,7 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
                       return <tr key={item.id} className={itemOverdue ? 'installment-child-overdue' : itemDueSoon ? 'installment-child-due-soon' : ''}>
                         <td>قسط {faNumber(item.number)}</td><td><strong>{formatMoney(item.amount)} تومان</strong></td><td>{displayInstallmentDate(item.dueAt)}</td><td>{item.paidAt ? displayInstallmentDate(item.paidAt) : <span className="installment-not-recorded">ثبت نشده</span>}</td>
                         <td>{item.paidAt ? <span className="status-pill success">پرداخت‌شده</span> : itemOverdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : itemDueSoon ? <span className="installment-status due-soon"><i className="due-soon-pulse" />سررسید نزدیک</span> : <span className="status-pill">پرداخت‌نشده</span>}</td>
-                        <td>{item.paidAt ? <button type="button" className="btn small" onClick={() => setPaymentTarget({ driver, installment: item })}>ویرایش تاریخ</button> : <button type="button" className="btn small primary" onClick={() => setPaymentTarget({ driver, installment: item })}>ثبت پرداخت</button>}</td>
+                        <td>{item.paidAt ? <button type="button" className="btn small" onClick={() => setPaymentTarget({ driver, installment: item })}>ویرایش</button> : <button type="button" className="btn small primary" onClick={() => setPaymentTarget({ driver, installment: item })}>ثبت پرداخت</button>}</td>
                       </tr>;
                     })}</tbody></table></div>
                 </td></tr>}

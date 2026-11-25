@@ -699,8 +699,8 @@ export class DriversService {
     const driver = await this.prisma.driver.findUnique({ where: { id }, select: { id: true, currentStage: true } });
     if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
     return this.prisma.$transaction(async (tx) => {
-      const existingCount = await tx.driverInstallment.count({ where: { driverId: id } });
-      if (existingCount > 0) return { created: false, count: existingCount };
+      const existingRows = await tx.driverInstallment.findMany({ where: { driverId: id }, orderBy: { number: 'asc' } });
+      if (existingRows.length >= INSTALLMENT_COUNT) return { created: false, count: existingRows.length };
       const draft = await tx.stageDraft.findUnique({ where: { driverId_stage: { driverId: id, stage: 'PROFORMA_PAYMENT_RESERVATION' } } });
       const payload = (draft?.payload || {}) as JsonObject;
       if (payload.paymentReceivedConfirmed !== true) throw new ConflictException('پرداخت اولیه باید توسط مالی تأیید شود.');
@@ -712,7 +712,9 @@ export class DriversService {
         : await tx.driverProduct.findMany({ where: { driverId: id }, select: { quantity: true, saleUnitPrice: true } });
       const installments = buildInstallmentRows(id, payload.paymentAmount, payload.paymentDate, products);
       if (!installments.length) throw new BadRequestException('اطلاعات کالای قیمت‌دار و پرداخت اولیه برای ساخت برنامهٔ قسط کافی نیست.');
-      const created = await tx.driverInstallment.createMany({ data: installments, skipDuplicates: true });
+      const existingNumbers = new Set(existingRows.map((item) => item.number));
+      const missingInstallments = installments.filter((item) => !existingNumbers.has(item.number));
+      const created = await tx.driverInstallment.createMany({ data: missingInstallments, skipDuplicates: true });
       const initialPayment = String(payload.paymentAmount);
       const totalAmount = installments.reduce((sum, item) => sum + item.amount, 0n);
       if (created.count > 0) {
@@ -774,31 +776,49 @@ export class DriversService {
   async recordInstallmentPayment(id: string, installmentId: string, input: RecordInstallmentPaymentDto, actor: AuthenticatedUser) {
     requireRole(actor, UserRole.LEGAL_FINANCE);
     const driver = await this.prisma.driver.findUnique({ where: { id }, select: { id: true } });
-    if (!driver) throw new NotFoundException('پرونده پیدا نشد.');
-    const paidAt = dateOnly(input.paidAt, 'تاریخ پرداخت');
+    if (!driver) throw new NotFoundException('\u067e\u0631\u0648\u0646\u062f\u0647 \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f.');
+    const paidAt = dateOnly(input.paidAt, '\u062a\u0627\u0631\u06cc\u062e \u067e\u0631\u062f\u0627\u062e\u062a');
     const todayInTehran = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date());
-    if (input.paidAt > todayInTehran) throw new BadRequestException('تاریخ پرداخت نمی‌تواند در آینده باشد.');
-    const existing = await this.prisma.driverInstallment.findFirst({ where: { id: installmentId, driverId: id } });
-    if (!existing) throw new NotFoundException('قسط موردنظر پیدا نشد.');
+    if (input.paidAt > todayInTehran) throw new BadRequestException('\u062a\u0627\u0631\u06cc\u062e \u067e\u0631\u062f\u0627\u062e\u062a \u0646\u0645\u06cc\u200c\u062a\u0648\u0627\u0646\u062f \u062f\u0631 \u0622\u06cc\u0646\u062f\u0647 \u0628\u0627\u0634\u062f.');
     return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.driverInstallment.findFirst({ where: { id: installmentId, driverId: id } });
+      if (!existing) throw new NotFoundException('\u0642\u0633\u0637 \u0645\u0648\u0631\u062f\u0646\u0638\u0631 \u067e\u06cc\u062f\u0627 \u0646\u0634\u062f.');
+      if (input.amount !== undefined && !existing.paidAt) throw new ConflictException('\u0645\u0628\u0644\u063a \u067e\u0631\u062f\u0627\u062e\u062a\u200c\u0634\u062f\u0647 \u0631\u0627 \u0628\u0631\u0627\u06cc \u0642\u0633\u0637 \u0646\u067e\u0631\u062f\u0627\u062e\u062a\u200c\u0634\u062f\u0647 \u062b\u0628\u062a \u06a9\u0646\u06cc\u062f.');
+      const amountChanged = input.amount !== undefined && BigInt(input.amount) !== existing.amount;
+      let installmentRows: Array<typeof existing> = [];
+      if (amountChanged) {
+        installmentRows = await tx.driverInstallment.findMany({ where: { driverId: id }, orderBy: { number: 'asc' } });
+        const unpaidRows = installmentRows.filter((row) => !row.paidAt);
+        if (!unpaidRows.length) throw new ConflictException('\u0647\u0645\u0647 \u0642\u0633\u0637\u200c\u0647\u0627 \u067e\u0631\u062f\u0627\u062e\u062a \u0634\u062f\u0647\u200c\u0627\u0646\u062f \u0648 \u0645\u0627\u0646\u062f\u0647\u200c\u0627\u06cc \u0628\u0631\u0627\u06cc \u0628\u0627\u0632\u062a\u0648\u0632\u06cc\u0639 \u0646\u0645\u0627\u0646\u062f\u0647 \u0627\u0633\u062a.');
+        const planTotal = installmentRows.reduce((sum, row) => sum + row.amount, 0n);
+        const otherPaid = installmentRows.filter((row) => row.paidAt && row.id !== existing.id).reduce((sum, row) => sum + row.amount, 0n);
+        const remaining = planTotal - otherPaid - BigInt(input.amount!);
+        if (remaining < BigInt(unpaidRows.length)) throw new BadRequestException('\u0645\u0628\u0644\u063a \u0642\u0633\u0637 \u0628\u0627 \u0645\u0627\u0646\u062f\u0647\u200c\u0642\u0633\u0637\u200c\u0647\u0627 \u0647\u0645\u062e\u0648\u0627\u0646\u06cc \u0646\u062f\u0627\u0631\u062f.');
+        const baseAmount = remaining / BigInt(unpaidRows.length);
+        const extra = remaining % BigInt(unpaidRows.length);
+        for (const [index, row] of unpaidRows.entries()) {
+          const nextAmount = baseAmount + (index === unpaidRows.length - 1 ? extra : 0n);
+          await tx.driverInstallment.update({ where: { id: row.id }, data: { amount: nextAmount } });
+        }
+      }
       const changed = await tx.driverInstallment.updateMany({
-        where: { id: installmentId, driverId: id, paidAt: existing.paidAt },
-        data: { paidAt, paidById: actor.id },
+        where: { id: installmentId, driverId: id, paidAt: existing.paidAt, amount: existing.amount },
+        data: { paidAt, paidById: actor.id, ...(input.amount !== undefined ? { amount: BigInt(input.amount) } : {}) },
       });
-      if (!changed.count) throw new ConflictException('قسط هم‌زمان تغییر کرده؛ اطلاعات تازه را بارگذاری کنید.');
+      if (!changed.count) throw new ConflictException('\u0642\u0633\u0637 \u0647\u0645\u200c\u0632\u0645\u0627\u0646 \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f\u0647\u061b \u0627\u0637\u0644\u0627\u0639\u0627\u062a \u062a\u0627\u0632\u0647 \u0631\u0627 \u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u06a9\u0646\u06cc\u062f.');
       const updated = await tx.driverInstallment.findUniqueOrThrow({ where: { id: installmentId } });
       await tx.auditEvent.create({
         data: {
           driverId: id,
           actorId: actor.id,
-          eventType: existing.paidAt ? 'INSTALLMENT_PAYMENT_UPDATED' : 'INSTALLMENT_PAYMENT_RECORDED',
-          details: { installmentId, number: existing.number, amount: String(existing.amount), paidAt: paidAt.toISOString() },
+          eventType: amountChanged ? 'INSTALLMENT_PAYMENT_AMOUNT_UPDATED' : existing.paidAt ? 'INSTALLMENT_PAYMENT_UPDATED' : 'INSTALLMENT_PAYMENT_RECORDED',
+          details: { installmentId, number: existing.number, previousAmount: String(existing.amount), amount: String(input.amount ?? existing.amount), paidAt: paidAt.toISOString(), ...(amountChanged ? { redistributedUnpaidCount: installmentRows.filter((row) => !row.paidAt).length } : {}) },
         },
       });
       return { ...updated, amount: String(updated.amount) };
-    });
+    }, { isolationLevel: 'Serializable' });
   }
 
   private async getActiveDriver(id: string) {

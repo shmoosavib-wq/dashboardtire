@@ -31,6 +31,7 @@ export class StoreSettlementDto {
 
 export class RecordInstallmentPaymentDto {
   @IsDateString() paidAt!: string;
+  @IsOptional() @IsInt() @Min(1) @Max(1000000000000000) amount?: number;
 }
 
 export class UploadDocumentDto {

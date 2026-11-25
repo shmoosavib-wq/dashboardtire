@@ -21,7 +21,7 @@ const actionNames: Record<string, string> = {
   WORKFLOW_SUBMIT_CONTRACT_CHEQUE: 'قرارداد و چک برای بررسی ارسال شد', WORKFLOW_APPROVE_CONTRACT_CHEQUE: 'قرارداد و چک تأیید شد',
   WORKFLOW_COMPLETE_DELIVERY: 'تحویل و مستندات نهایی شد',
   WORKFLOW_STAGE_REOPENED: 'پرونده به مرحلهٔ قبل برگشت',
-  INSTALLMENT_PLAN_CREATED: 'برنامهٔ قسط‌ها ایجاد شد', INSTALLMENT_PAYMENT_RECORDED: 'پرداخت قسط ثبت شد', INSTALLMENT_PAYMENT_UPDATED: 'زمان پرداخت قسط اصلاح شد',
+  INSTALLMENT_PLAN_CREATED: 'برنامهٔ قسط‌ها ایجاد شد', INSTALLMENT_PAYMENT_RECORDED: 'پرداخت قسط ثبت شد', INSTALLMENT_PAYMENT_UPDATED: 'زمان پرداخت قسط اصلاح شد', INSTALLMENT_PAYMENT_AMOUNT_UPDATED: 'مبلغ پرداخت‌شده و ماندهٔ اقساط اصلاح شد',
 };
 const categoryNames: Record<string, string> = {
   IDENTITY: 'مدارک هویتی', CREDIT_RESULT: 'نتیجه اعتبارسنجی', PROFORMA: 'پیش‌فاکتور',

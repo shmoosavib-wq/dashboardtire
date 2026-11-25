@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma.service';
 
 type Granularity = 'daily' | 'monthly';
 type Period = '30d' | '3m' | '6m' | '12m';
-type Bucket = { key: string; salesCount: number; salesAmount: bigint; receivedAmount: bigint; dueAmount: bigint };
+type Bucket = { key: string; salesCount: number; salesAmount: bigint; receivedAmount: bigint; supplierPaidAmount: bigint; dueAmount: bigint };
 type JsonObject = Record<string, unknown>;
 
 const tehranDateFormat = new Intl.DateTimeFormat('en-CA', {
@@ -125,14 +125,14 @@ export class DashboardService {
       stage,
       stageRows.find((row) => row.currentStage === stage)?._count._all || 0,
     ])) as Record<WorkflowStage, number>;
-    const buckets = new Map(keys.map((key) => [key, { key, salesCount: 0, salesAmount: 0n, receivedAmount: 0n, dueAmount: 0n } satisfies Bucket]));
+    const buckets = new Map(keys.map((key) => [key, { key, salesCount: 0, salesAmount: 0n, receivedAmount: 0n, supplierPaidAmount: 0n, dueAmount: 0n } satisfies Bucket]));
     const canViewFinancials = isFinancialUser(actor);
     const activity = await this.prisma.auditEvent.findMany({
       where: {
         driverId: { not: null },
         OR: [
           { eventType: { startsWith: 'WORKFLOW_' } },
-          { eventType: { in: ['INSTALLMENT_PAYMENT_RECORDED', 'INSTALLMENT_PAYMENT_UPDATED', 'DRIVER_CREATED'] } },
+          { eventType: { in: ['INSTALLMENT_PAYMENT_RECORDED', 'INSTALLMENT_PAYMENT_UPDATED', 'INSTALLMENT_PAYMENT_AMOUNT_UPDATED', 'DRIVER_CREATED'] } },
         ],
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 6,
@@ -282,6 +282,20 @@ export class DashboardService {
         if (bucket) bucket.dueAmount += installment.amount;
       }
 
+      const supplierSettlements = await this.prisma.supplierSettlementRecord.findMany({
+        where: { settledAt: { gte: from, lt: to } },
+        select: { amount: true, settledAt: true },
+      });
+      let supplierPaidAmount = 0n;
+      for (const settlement of supplierSettlements) {
+        const settledKey = dateKey(settlement.settledAt);
+        const key = granularity === 'daily' ? settledKey : monthKey(settledKey);
+        const bucket = buckets.get(key);
+        if (!bucket) continue;
+        bucket.supplierPaidAmount += settlement.amount;
+        supplierPaidAmount += settlement.amount;
+      }
+
       const rows = keys.map((key) => ({ ...buckets.get(key)!, labelKey: key }));
       const overdueAmount = unpaidOverdue._sum.amount || 0n;
       return {
@@ -295,13 +309,15 @@ export class DashboardService {
           salesCount,
           salesAmount: String(salesAmount),
           receivedAmount: String(receivedAmount),
+          supplierPaidAmount: String(supplierPaidAmount),
+          cashflowNet: String(receivedAmount - supplierPaidAmount),
           nextDueAmount: String(upcomingSummary._sum.amount || 0n),
           overdueAmount: String(overdueAmount),
           overdueCount: unpaidOverdue._count._all,
           nextDueCount: upcomingSummary._count._all,
         },
         series: rows.map((row) => ({ ...row,
-          salesAmount: String(row.salesAmount), receivedAmount: String(row.receivedAmount), dueAmount: String(row.dueAmount),
+          salesAmount: String(row.salesAmount), receivedAmount: String(row.receivedAmount), supplierPaidAmount: String(row.supplierPaidAmount), cashflowNet: String(row.receivedAmount - row.supplierPaidAmount), dueAmount: String(row.dueAmount),
         })),
         dueItems: [...overdueItems, ...upcomingItems].map((item) => ({
           id: item.id, driverId: item.driver.id, driverName: item.driver.fullName, number: item.number,
@@ -362,8 +378,8 @@ export class DashboardService {
       hasFinancialAccess: false,
       activeCases,
       stageCounts,
-      totals: { salesCount: rows.reduce((sum, row) => sum + row.salesCount, 0), salesAmount: null, receivedAmount: null, nextDueAmount: null, overdueAmount: null, overdueCount: null, nextDueCount: null },
-      series: rows.map((row) => ({ ...row, salesAmount: null, receivedAmount: null, dueAmount: null })),
+      totals: { salesCount: rows.reduce((sum, row) => sum + row.salesCount, 0), salesAmount: null, receivedAmount: null, supplierPaidAmount: null, cashflowNet: null, nextDueAmount: null, overdueAmount: null, overdueCount: null, nextDueCount: null },
+      series: rows.map((row) => ({ ...row, salesAmount: null, receivedAmount: null, supplierPaidAmount: null, cashflowNet: null, dueAmount: null })),
       dueItems: null,
       activity: activity.map((item) => ({ id: item.id, eventType: item.eventType, createdAt: item.createdAt,
         driverId: item.driver?.id || null, driverName: item.driver?.fullName || null, actorName: item.actor?.name || null,
