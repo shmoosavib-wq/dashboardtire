@@ -9,7 +9,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch('/api' + path, { ...init, cache: init.cache ?? 'no-store', headers, credentials: 'same-origin' });
-  } catch {
+  } catch (error) {
+    if (init.signal?.aborted) throw error;
     throw new ApiError('\u0627\u0631\u062a\u0628\u0627\u0637 \u0628\u0627 \u0633\u0631\u0648\u0631 \u0628\u0631\u0642\u0631\u0627\u0631 \u0646\u0634\u062f. \u0627\u062a\u0635\u0627\u0644 \u0631\u0627 \u0628\u0631\u0631\u0633\u06cc \u06a9\u0646\u06cc\u062f \u0648 \u062f\u0648\u0628\u0627\u0631\u0647 \u062a\u0644\u0627\u0634 \u06a9\u0646\u06cc\u062f.', 0);
   }
   if (!response.ok) {

@@ -189,6 +189,7 @@ model DriverInstallment {
 
   @@unique([driverId, number])
   @@index([driverId, dueAt])
+  @@index([paidAt, dueAt])
 }
 
 model AuditEvent {
@@ -204,4 +205,5 @@ model AuditEvent {
   @@index([driverId, createdAt])
   @@index([actorId, createdAt])
   @@index([eventType, createdAt])
+  @@index([eventType, driverId, createdAt, id])
 }

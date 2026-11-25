@@ -6,7 +6,9 @@ import './dashboard.css';
 
 type Granularity = 'daily' | 'monthly';
 type Period = '30d' | '3m' | '6m' | '12m';
+type CashflowPeriod = '3m' | '6m';
 type Metric = 'salesCount' | 'salesAmount' | 'receivedAmount' | 'dueAmount';
+type DashboardSeriesItem = { key: string; labelKey: string; salesCount: number; salesAmount: string | null; receivedAmount: string | null; supplierPaidAmount: string | null; cashflowNet: string | null; dueAmount: string | null };
 type DashboardResponse = {
   period: Period;
   granularity: Granularity;
@@ -25,7 +27,8 @@ type DashboardResponse = {
     overdueCount: number | null;
     nextDueCount: number | null;
   };
-  series: { key: string; labelKey: string; salesCount: number; salesAmount: string | null; receivedAmount: string | null; supplierPaidAmount: string | null; cashflowNet: string | null; dueAmount: string | null }[];
+  series: DashboardSeriesItem[];
+  cashflow?: { period: CashflowPeriod; totals: { receivedAmount: string; supplierPaidAmount: string; cashflowNet: string }; series: DashboardSeriesItem[] };
   dueItems: { id: string; driverId: string; driverName: string; number: number; amount: string; dueAt: string; overdue: boolean; dueSoon: boolean }[] | null;
   activity: { id: string; eventType: string; createdAt: string; driverId: string | null; driverName: string | null; actorName: string | null }[];
 };
@@ -128,28 +131,27 @@ function Chart({ data, metric, granularity, onSelect }: {
   </div>;
 }
 
-function CashflowChart({ data, granularity }: { data: DashboardResponse['series']; granularity: Granularity }) {
+function CashflowChart({ data }: { data: DashboardResponse['series'] }) {
   const width = 1000;
   const height = 230;
   const left = 62;
   const right = 24;
   const top = 18;
   const bottom = 30;
-  const max = Math.max(1, ...data.flatMap((item) => [amount(item.receivedAmount), amount(item.supplierPaidAmount), Math.abs(signedAmount(item.cashflowNet))]));
+  const max = Math.max(1, ...data.map((item) => Math.abs(signedAmount(item.cashflowNet))));
   const plotWidth = width - left - right;
-  const firstStart = data.length ? bucketBounds(data[0].labelKey, granularity)[0] : 0;
-  const lastEnd = data.length ? bucketBounds(data[data.length - 1].labelKey, granularity)[1] : 1;
+  const firstStart = data.length ? bucketBounds(data[0].labelKey, 'daily')[0] : 0;
+  const lastEnd = data.length ? bucketBounds(data[data.length - 1].labelKey, 'daily')[1] : 1;
   const timeToX = (time: number) => width - right - ((time - firstStart) / (lastEnd - firstStart || 1)) * plotWidth;
   const points = data.map((item) => {
-    const [start, end] = bucketBounds(item.labelKey, granularity);
+    const [start, end] = bucketBounds(item.labelKey, 'daily');
     return { ...item, x: timeToX((start + end) / 2), slotWidth: timeToX(start) - timeToX(end) };
   });
-  const maxBarWidth = data.length <= 3 ? 82 : data.length <= 6 ? 58 : data.length <= 12 ? 42 : 30;
   const tickIndexes = Array.from(new Set([0, Math.floor((data.length - 1) / 3), Math.floor((data.length - 1) * 2 / 3), data.length - 1]));
   const plotHeight = height - top - bottom;
   const zeroY = top + plotHeight / 2;
   return <div className="dash-cashflow-chart-wrap">
-    <svg className="dash-chart dash-cashflow-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="نمودار جریان نقدی شامل وصولی، پرداخت به تأمین‌کننده و خالص نقدینگی" preserveAspectRatio="none">
+    <svg className="dash-chart dash-cashflow-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="نمودار روزانهٔ خالص نقدینگی؛ مقادیر منفی پایین‌تر از خط صفر نمایش داده می‌شوند" preserveAspectRatio="none">
       {[-1, -.5, 0, .5, 1].map((ratio) => {
         const lineY = zeroY - plotHeight / 2 * ratio;
         return <g key={ratio}><line x1={left} x2={width - right} y1={lineY} y2={lineY} className="dash-grid-line" /><text x={left - 10} y={lineY + 4} textAnchor="end" className="dash-axis-label">{shortMoney(Math.round(max * ratio))}</text></g>;
@@ -159,18 +161,16 @@ function CashflowChart({ data, granularity }: { data: DashboardResponse['series'
         const received = amount(point.receivedAmount);
         const paid = amount(point.supplierPaidAmount);
         const net = signedAmount(point.cashflowNet);
-        const groupWidth = Math.min(maxBarWidth, point.slotWidth * 0.72);
-        const barWidth = Math.max(4, groupWidth / 3 - 2);
-        const receivedHeight = plotHeight / 2 * received / max;
-        const paidHeight = plotHeight / 2 * paid / max;
+        if (!net) return null;
+        const barWidth = Math.max(1.5, Math.min(14, point.slotWidth * 0.62));
         const netHeight = plotHeight / 2 * Math.abs(net) / max;
         return <g key={point.key} className="dash-cashflow-group" style={{ animationDelay: `${Math.min(index, 30) * 8 + 100}ms` }}>
-          <rect className="dash-cashflow-bar received" x={point.x - groupWidth / 2} y={zeroY - receivedHeight} width={barWidth} height={receivedHeight} rx="4"><title>{localizeKey(point.labelKey, granularity, true)} · وصولی {formatMoney(point.receivedAmount || '0')} تومان</title></rect>
-          <rect className="dash-cashflow-bar paid" x={point.x - barWidth / 2} y={zeroY - paidHeight} width={barWidth} height={paidHeight} rx="4"><title>{localizeKey(point.labelKey, granularity, true)} · پرداخت تأمین‌کننده {formatMoney(point.supplierPaidAmount || '0')} تومان</title></rect>
-          <rect className={`dash-cashflow-bar net ${net < 0 ? 'negative' : ''}`} x={point.x + groupWidth / 2 - barWidth} y={net >= 0 ? zeroY - netHeight : zeroY} width={barWidth} height={netHeight} rx="4"><title>{localizeKey(point.labelKey, granularity, true)} · خالص نقدینگی {net < 0 ? '−' : ''}{formatMoney(String(Math.abs(net)))} تومان</title></rect>
+          <rect className={`dash-cashflow-bar net ${net < 0 ? 'negative' : ''}`} x={point.x - barWidth / 2} y={net > 0 ? zeroY - netHeight : zeroY} width={barWidth} height={netHeight} rx={Math.min(4, barWidth / 2)}>
+            <title>{localizeKey(point.labelKey, 'daily', true)} · وصولی {formatMoney(point.receivedAmount || '0')} تومان · پرداخت تأمین‌کننده {formatMoney(point.supplierPaidAmount || '0')} تومان · خالص {net < 0 ? 'منفی ' : ''}{formatMoney(String(Math.abs(net)))} تومان</title>
+          </rect>
         </g>;
       })}
-      {tickIndexes.map((index) => <text key={index} x={points[index]?.x ?? 0} y={height - 7} textAnchor="middle" className="dash-axis-label">{localizeKey(data[index]?.labelKey || '', granularity, true)}</text>)}
+      {tickIndexes.map((index) => <text key={index} x={points[index]?.x ?? 0} y={height - 7} textAnchor="middle" className="dash-axis-label">{localizeKey(data[index]?.labelKey || '', 'daily', true)}</text>)}
     </svg>
   </div>;
 }
@@ -180,9 +180,11 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
   onOpenInstallments: () => void;
 }) {
   const [period, setPeriod] = useState<Period>('30d');
+  const [cashflowPeriod, setCashflowPeriod] = useState<CashflowPeriod>('3m');
   const [granularity, setGranularity] = useState<Granularity>('daily');
   const [metric, setMetric] = useState<Metric>('salesCount');
   const [data, setData] = useState<DashboardResponse | null>(null);
+  const [refreshSequence, setRefreshSequence] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
@@ -202,28 +204,36 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
     };
   }, [openKpiTip]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError('');
     try {
-      const result = await api<DashboardResponse>(`/dashboard/summary?period=${period}&granularity=${granularity}`);
+      const result = await api<DashboardResponse>(`/dashboard/summary?period=${period}&granularity=${granularity}&cashflowPeriod=${cashflowPeriod}`, { signal });
+      if (signal?.aborted) return;
       setData(result);
       if (!result.hasFinancialAccess) setMetric('salesCount');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'دریافت اطلاعات داشبورد انجام نشد.');
-    } finally { setLoading(false); }
-  }, [period, granularity]);
+      if (!signal?.aborted) setError(reason instanceof Error ? reason.message : 'دریافت اطلاعات داشبورد انجام نشد.');
+    } finally { if (!signal?.aborted) setLoading(false); }
+  }, [period, granularity, cashflowPeriod]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load, refreshSequence]);
   const activeMetric: Metric = data?.hasFinancialAccess ? metric : 'salesCount';
   const selected = selectedPoint === null ? null : data?.series[selectedPoint] || null;
   const chartTotal = useMemo(() => data?.series.reduce((sum, item) => sum + (activeMetric === 'salesCount' ? item.salesCount : amount(item[activeMetric])), 0) || 0, [data, activeMetric]);
   const overdueItems = data?.dueItems?.filter((item) => item.overdue) || [];
   const upcomingItems = data?.dueItems?.filter((item) => !item.overdue) || [];
   const latestUpdate = data?.generatedAt ? displayDateTime(data.generatedAt) : '—';
-  const cashflowReceived = useMemo(() => data?.series.reduce((sum, item) => sum + amount(item.receivedAmount), 0) || 0, [data]);
-  const cashflowSupplierPaid = useMemo(() => data?.series.reduce((sum, item) => sum + amount(item.supplierPaidAmount), 0) || 0, [data]);
-  const cashflowNet = cashflowReceived - cashflowSupplierPaid;
+  const cashflowReceived = data?.cashflow?.totals.receivedAmount;
+  const cashflowSupplierPaid = data?.cashflow?.totals.supplierPaidAmount;
+  const cashflowNet = data?.cashflow?.totals.cashflowNet;
+  const cashflowReady = data?.cashflow?.period === cashflowPeriod;
+  const cashflowNetValue = BigInt(cashflowNet || '0');
+  const cashflowNetAbsolute = cashflowNetValue < 0n ? -cashflowNetValue : cashflowNetValue;
 
   const kpiExplanations: Record<string, string> = {
     cases: 'شمار همهٔ پرونده‌های فروش که هنوز به آرشیو منتقل نشده‌اند؛ پرونده‌های تکمیل‌شده هم تا زمان آرشیو در این عدد می‌مانند. این شاخص لحظه‌ای است و به بازهٔ گزارش وابسته نیست.',
@@ -247,10 +257,10 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
   return <div className="page-stack dashboard-page">
     <header className="dash-heading">
       <div><div className="eyebrow">نمای کلی عملکرد</div><h1>داشبورد فروش</h1><p>روند فروش، وصول و پرونده‌های در جریان را یک‌جا ببینید.</p></div>
-      <div className="dash-refresh"><span className="dash-live-dot" />{loading ? 'در حال به‌روزرسانی…' : `آخرین به‌روزرسانی · ${latestUpdate}`}<button type="button" className="dash-refresh-button" onClick={() => void load()} disabled={loading} aria-label="به‌روزرسانی داشبورد" title="به‌روزرسانی">↻</button></div>
+      <div className="dash-refresh"><span className="dash-live-dot" />{loading ? 'در حال به‌روزرسانی…' : `آخرین به‌روزرسانی · ${latestUpdate}`}<button type="button" className="dash-refresh-button" onClick={() => setRefreshSequence((current) => current + 1)} disabled={loading} aria-label="به‌روزرسانی داشبورد" title="به‌روزرسانی">↻</button></div>
     </header>
 
-    {error && <div className="alert error dash-error" role="alert">{error}<button className="text-button" onClick={() => void load()}>تلاش دوباره</button></div>}
+    {error && <div className="alert error dash-error" role="alert">{error}<button className="text-button" onClick={() => setRefreshSequence((current) => current + 1)}>تلاش دوباره</button></div>}
 
     <div className="dash-kpi-toolbar">
       <span>بازهٔ گزارش</span>
@@ -299,9 +309,13 @@ export default function DashboardPage({ onOpenStage, onOpenInstallments }: {
     </section>
 
     {data?.hasFinancialAccess && <section className="dash-section dash-cashflow-section">
-      <div className="dash-section-head dash-chart-head"><div><h2>جریان نقدی</h2><p>مقایسهٔ وصولی واقعی با پرداخت به تأمین‌کنندگان در بازهٔ {periodLabels[period]}</p></div><div className="dash-cashflow-legend" aria-label="راهنمای نمودار"><span className="received"><i />وصولی</span><span className="paid"><i />پرداخت تأمین‌کننده</span><span className="net"><i />خالص نقدینگی</span></div></div>
-      <div className="dash-cashflow-summary"><div><small>وصولی واقعی</small><strong>{formatMoney(String(cashflowReceived))} تومان</strong></div><div><small>پرداخت به تأمین‌کننده</small><strong>{formatMoney(String(cashflowSupplierPaid))} تومان</strong></div><div className={cashflowNet >= 0 ? 'positive' : 'negative'}><small>خالص نقدینگی</small><strong>{cashflowNet < 0 ? '−' : ''}{formatMoney(String(Math.abs(cashflowNet)))} تومان</strong></div></div>
-      <CashflowChart data={data.series} granularity={granularity} />
+      <div className="dash-section-head dash-chart-head"><div><h2>جریان نقدی</h2><p>خالص روزانهٔ وصولی منهای پرداخت به تأمین‌کننده · {periodLabels[cashflowPeriod]}</p></div><div className="dash-cashflow-controls"><div className="dash-segment" role="group" aria-label="بازهٔ نمودار جریان نقدی">
+        {([['3m', '۳ ماه'], ['6m', '۶ ماه']] as [CashflowPeriod, string][]).map(([value, label]) => <button key={value} type="button" aria-pressed={cashflowPeriod === value} className={cashflowPeriod === value ? 'active' : ''} onClick={() => setCashflowPeriod(value)}>{label}</button>)}
+      </div><div className="dash-cashflow-legend" aria-label="راهنمای خالص نقدینگی"><span className="positive"><i />خالص مثبت</span><span className="negative"><i />خالص منفی</span></div></div></div>
+      <div className="dash-cashflow-summary"><div><small>وصولی واقعی</small><strong>{cashflowReady ? `${formatMoney(cashflowReceived || '0')} تومان` : '—'}</strong></div><div><small>پرداخت به تأمین‌کننده</small><strong>{cashflowReady ? `${formatMoney(cashflowSupplierPaid || '0')} تومان` : '—'}</strong></div><div className={cashflowReady && cashflowNetValue < 0n ? 'negative' : 'positive'}><small>خالص نقدینگی</small><strong>{cashflowReady ? `${cashflowNetValue < 0n ? '−' : ''}${formatMoney(String(cashflowNetAbsolute))} تومان` : '—'}</strong></div></div>
+      {loading || (!cashflowReady && !error) ? <div className="dash-chart-loading"><LoadingIndicator label="در حال دریافت جریان نقدی…" compact /></div>
+        : error ? <div className="dash-empty" role="alert">برای به‌روزرسانی جریان نقدی، دریافت داشبورد ناموفق بود.<button type="button" className="text-button" onClick={() => setRefreshSequence((current) => current + 1)}>تلاش دوباره</button></div>
+          : <CashflowChart key={cashflowPeriod} data={data?.cashflow?.series || []} />}
     </section>}
 
     <div className="dash-lower-grid">

@@ -23,8 +23,9 @@ test('dashboard sales count represents tire pairs sold, not confirmed driver cas
       count: async () => 1,
       groupBy: async () => [],
     },
+    $queryRaw: async () => [{ id: 'event-1' }],
     auditEvent: {
-      findMany: async (args) => args.where.eventType === 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' ? [{
+      findMany: async (args) => args.where.id?.in?.includes('event-1') ? [{
         driverId: 'driver-1', createdAt: new Date(), details: { paymentDate: today },
         driver: {
           drafts: [{ payload: { products: [{ quantity: 2 }, { quantity: '5' }] } }],

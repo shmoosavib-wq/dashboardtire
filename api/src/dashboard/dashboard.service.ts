@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { UserRole, WorkflowStage, type Prisma } from '@prisma/client';
+import { Prisma, UserRole, WorkflowStage, type Prisma as PrismaTypes } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
 
@@ -45,7 +45,7 @@ function bucketKeys(granularity: Granularity, start: string, endExclusive: strin
 
 function tehranDayStart(key: string): Date { return new Date(`${key}T00:00:00+03:30`); }
 
-function asObject(value: Prisma.JsonValue | null | undefined): JsonObject {
+function asObject(value: PrismaTypes.JsonValue | null | undefined): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {};
 }
 
@@ -96,7 +96,7 @@ function isFinancialUser(actor: AuthenticatedUser): boolean {
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async summary(rawPeriod: string | undefined, rawGranularity: string | undefined, actor: AuthenticatedUser) {
+  async summary(rawPeriod: string | undefined, rawGranularity: string | undefined, actor: AuthenticatedUser, rawCashflowPeriod?: string) {
     const periodAliases: Record<string, Period> = { daily: '30d', monthly: '12m' };
     const legacyGranularity = rawPeriod === 'daily' || rawPeriod === 'monthly' ? rawPeriod
       : !rawPeriod && (rawGranularity === 'daily' || rawGranularity === 'monthly') ? rawGranularity : undefined;
@@ -110,12 +110,24 @@ export class DashboardService {
     }
     const granularity: Granularity = rawGranularity === 'daily' || rawGranularity === 'monthly'
       ? rawGranularity : legacyGranularity || (period === '30d' ? 'daily' : 'monthly');
+    if (rawCashflowPeriod && !['3m', '6m'].includes(rawCashflowPeriod)) {
+      throw new BadRequestException('بازهٔ جریان نقدی معتبر نیست.');
+    }
+    const canViewFinancials = isFinancialUser(actor);
+    const cashflowPeriod = canViewFinancials ? rawCashflowPeriod as '3m' | '6m' | undefined : undefined;
     const today = dateKey(new Date());
     const periodMonths = period === '30d' ? 0 : Number.parseInt(period, 10);
     const firstDay = period === '30d' ? shiftDay(today, -29) : `${shiftMonth(monthKey(today), 1 - periodMonths)}-01`;
+    const cashflowFirstDay = cashflowPeriod
+      ? `${shiftMonth(monthKey(today), 1 - Number.parseInt(cashflowPeriod, 10))}-01`
+      : undefined;
     const endExclusive = shiftDay(today, 1);
     const keys = bucketKeys(granularity, firstDay, endExclusive);
-    const from = tehranDayStart(firstDay);
+    const cashflowKeys = cashflowFirstDay ? bucketKeys('daily', cashflowFirstDay, endExclusive) : [];
+    const cashflowBuckets = new Map(cashflowKeys.map((key) => [key, { key, salesCount: 0, salesAmount: 0n, receivedAmount: 0n, supplierPaidAmount: 0n, dueAmount: 0n } satisfies Bucket]));
+    const queryFirstDay = cashflowFirstDay && cashflowFirstDay < firstDay ? cashflowFirstDay : firstDay;
+    const from = tehranDayStart(queryFirstDay);
+    const reportFrom = tehranDayStart(firstDay);
     const to = tehranDayStart(endExclusive);
     const [activeCases, stageRows] = await Promise.all([
       this.prisma.driver.count({ where: { archivedAt: null } }),
@@ -126,7 +138,6 @@ export class DashboardService {
       stageRows.find((row) => row.currentStage === stage)?._count._all || 0,
     ])) as Record<WorkflowStage, number>;
     const buckets = new Map(keys.map((key) => [key, { key, salesCount: 0, salesAmount: 0n, receivedAmount: 0n, supplierPaidAmount: 0n, dueAmount: 0n } satisfies Bucket]));
-    const canViewFinancials = isFinancialUser(actor);
     const activity = await this.prisma.auditEvent.findMany({
       where: {
         driverId: { not: null },
@@ -142,10 +153,17 @@ export class DashboardService {
         actor: { select: { name: true } },
       },
     });
+    const firstPaymentConfirmationIds = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT DISTINCT ON ("driverId") "id"
+      FROM "AuditEvent"
+      WHERE "eventType" = 'WORKFLOW_CONFIRM_INITIAL_PAYMENT'
+        AND "driverId" IS NOT NULL
+      ORDER BY "driverId", "createdAt", "id"
+    `);
 
     if (canViewFinancials) {
-      const confirmations = await this.prisma.auditEvent.findMany({
-        where: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT' },
+      const confirmations = firstPaymentConfirmationIds.length ? await this.prisma.auditEvent.findMany({
+        where: { id: { in: firstPaymentConfirmationIds.map(({ id }) => id) } },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: {
           driverId: true,
@@ -158,22 +176,13 @@ export class DashboardService {
             },
           },
         },
-      });
-      const financialCorrections = await this.prisma.auditEvent.findMany({
-        where: { eventType: 'FINANCIAL_PRODUCT_CORRECTED', driverId: { not: null } },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        select: { driverId: true, details: true },
-      });
-      const latestCorrectionByDriver = new Map<string, JsonObject>();
-      for (const correction of financialCorrections) {
-        if (correction.driverId && !latestCorrectionByDriver.has(correction.driverId)) {
-          latestCorrectionByDriver.set(correction.driverId, asObject(correction.details));
-        }
-      }
+      }) : [];
       const firstConfirmationByDriver = new Set<string>();
+      const relevantConfirmations: typeof confirmations = [];
       let salesCount = 0;
       let salesAmount = 0n;
       let initialReceived = 0n;
+      let cashflowInitialReceived = 0n;
       for (const event of confirmations) {
         if (!event.driverId || firstConfirmationByDriver.has(event.driverId)) continue;
         firstConfirmationByDriver.add(event.driverId);
@@ -182,25 +191,59 @@ export class DashboardService {
         const paymentKey = typeof details.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(details.paymentDate)
           ? details.paymentDate : typeof payload.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.paymentDate)
             ? payload.paymentDate : dateKey(event.createdAt);
-        if (paymentKey < firstDay || paymentKey >= endExclusive) continue;
-        const key = granularity === 'daily' ? paymentKey : monthKey(paymentKey);
-        const bucket = buckets.get(key);
-        if (!bucket) continue;
-        const correction = latestCorrectionByDriver.get(event.driverId);
-        const sale = asAmount(correction?.saleAmount) ?? asAmount(details.saleAmount) ?? readSaleAmount(payload, event.driver?.products || []);
+        if ((paymentKey >= firstDay && paymentKey < endExclusive) ||
+          (cashflowFirstDay && paymentKey >= cashflowFirstDay && paymentKey < endExclusive)) {
+          relevantConfirmations.push(event);
+        }
+      }
+
+      const confirmedDriverIds = [...new Set(relevantConfirmations.map((event) => event.driverId).filter((id): id is string => !!id))];
+      const financialCorrections = confirmedDriverIds.length ? await this.prisma.auditEvent.findMany({
+        where: { eventType: 'FINANCIAL_PRODUCT_CORRECTED', driverId: { in: confirmedDriverIds } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { driverId: true, details: true },
+      }) : [];
+      const latestCorrectionByDriver = new Map<string, JsonObject>();
+      for (const correction of financialCorrections) {
+        if (correction.driverId && !latestCorrectionByDriver.has(correction.driverId)) {
+          latestCorrectionByDriver.set(correction.driverId, asObject(correction.details));
+        }
+      }
+      for (const event of relevantConfirmations) {
+        if (!event.driverId) continue;
+        const details = asObject(event.details);
+        const payload = asObject(event.driver?.drafts[0]?.payload);
+        const paymentKey = typeof details.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(details.paymentDate)
+          ? details.paymentDate : typeof payload.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.paymentDate)
+            ? payload.paymentDate : dateKey(event.createdAt);
         const payment = asAmount(details.initialPaymentAmount) ?? asAmount(payload.paymentAmount) ?? 0n;
-        const pairsSold = typeof correction?.soldPairs === 'number' && Number.isSafeInteger(correction.soldPairs) && correction.soldPairs >= 0
-          ? correction.soldPairs : readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
-        bucket.salesCount += pairsSold;
-        bucket.salesAmount += sale;
-        bucket.receivedAmount += payment;
-        salesCount += pairsSold;
-        salesAmount += sale;
-        initialReceived += payment;
+        if (paymentKey >= firstDay && paymentKey < endExclusive) {
+          const key = granularity === 'daily' ? paymentKey : monthKey(paymentKey);
+          const bucket = buckets.get(key);
+          if (bucket) {
+            const correction = latestCorrectionByDriver.get(event.driverId);
+            const sale = asAmount(correction?.saleAmount) ?? asAmount(details.saleAmount) ?? readSaleAmount(payload, event.driver?.products || []);
+            const pairsSold = typeof correction?.soldPairs === 'number' && Number.isSafeInteger(correction.soldPairs) && correction.soldPairs >= 0
+              ? correction.soldPairs : readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
+            bucket.salesCount += pairsSold;
+            bucket.salesAmount += sale;
+            bucket.receivedAmount += payment;
+            salesCount += pairsSold;
+            salesAmount += sale;
+            initialReceived += payment;
+          }
+        }
+        if (cashflowFirstDay && paymentKey >= cashflowFirstDay && paymentKey < endExclusive) {
+          const bucket = cashflowBuckets.get(paymentKey);
+          if (bucket) {
+            bucket.receivedAmount += payment;
+            cashflowInitialReceived += payment;
+          }
+        }
       }
 
       const confirmedDrafts = await this.prisma.stageDraft.findMany({
-        where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION },
+        where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION, payload: { path: ['paymentReceivedConfirmed'], equals: true } },
         select: {
           driverId: true,
           payload: true,
@@ -219,19 +262,28 @@ export class DashboardService {
         firstConfirmationByDriver.add(draftRow.driverId);
         const paymentKey = typeof payload.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.paymentDate)
           ? payload.paymentDate : dateKey(draftRow.driver.createdAt);
-        if (paymentKey < firstDay || paymentKey >= endExclusive) continue;
-        const key = granularity === 'daily' ? paymentKey : monthKey(paymentKey);
-        const bucket = buckets.get(key);
-        if (!bucket) continue;
-        const sale = readSaleAmount(payload, draftRow.driver.products);
         const payment = asAmount(payload.paymentAmount) ?? 0n;
-        const pairsSold = readConfirmedSaleQuantity({}, payload, draftRow.driver.products);
-        bucket.salesCount += pairsSold;
-        bucket.salesAmount += sale;
-        bucket.receivedAmount += payment;
-        salesCount += pairsSold;
-        salesAmount += sale;
-        initialReceived += payment;
+        if (paymentKey >= firstDay && paymentKey < endExclusive) {
+          const key = granularity === 'daily' ? paymentKey : monthKey(paymentKey);
+          const bucket = buckets.get(key);
+          if (bucket) {
+            const sale = readSaleAmount(payload, draftRow.driver.products);
+            const pairsSold = readConfirmedSaleQuantity({}, payload, draftRow.driver.products);
+            bucket.salesCount += pairsSold;
+            bucket.salesAmount += sale;
+            bucket.receivedAmount += payment;
+            salesCount += pairsSold;
+            salesAmount += sale;
+            initialReceived += payment;
+          }
+        }
+        if (cashflowFirstDay && paymentKey >= cashflowFirstDay && paymentKey < endExclusive) {
+          const bucket = cashflowBuckets.get(paymentKey);
+          if (bucket) {
+            bucket.receivedAmount += payment;
+            cashflowInitialReceived += payment;
+          }
+        }
       }
 
       const todayStart = tehranDayStart(today);
@@ -261,18 +313,29 @@ export class DashboardService {
         }),
       ]);
       let receivedAmount = initialReceived;
+      let cashflowReceivedAmount = cashflowInitialReceived;
       for (const installment of installments) {
         if (!installment.paidAt) continue;
         const paidKey = dateKey(installment.paidAt);
-        const key = granularity === 'daily' ? paidKey : monthKey(paidKey);
-        const bucket = buckets.get(key);
-        if (!bucket) continue;
-        bucket.receivedAmount += installment.amount;
-        receivedAmount += installment.amount;
+        if (paidKey >= firstDay && paidKey < endExclusive) {
+          const key = granularity === 'daily' ? paidKey : monthKey(paidKey);
+          const bucket = buckets.get(key);
+          if (bucket) {
+            bucket.receivedAmount += installment.amount;
+            receivedAmount += installment.amount;
+          }
+        }
+        if (cashflowFirstDay && paidKey >= cashflowFirstDay && paidKey < endExclusive) {
+          const bucket = cashflowBuckets.get(paidKey);
+          if (bucket) {
+            bucket.receivedAmount += installment.amount;
+            cashflowReceivedAmount += installment.amount;
+          }
+        }
       }
 
       const scheduled = await this.prisma.driverInstallment.findMany({
-        where: { dueAt: { gte: from, lt: to }, paidAt: null },
+        where: { dueAt: { gte: reportFrom, lt: to }, paidAt: null },
         select: { amount: true, dueAt: true },
       });
       for (const installment of scheduled) {
@@ -287,13 +350,24 @@ export class DashboardService {
         select: { amount: true, settledAt: true },
       });
       let supplierPaidAmount = 0n;
+      let cashflowSupplierPaidAmount = 0n;
       for (const settlement of supplierSettlements) {
         const settledKey = dateKey(settlement.settledAt);
-        const key = granularity === 'daily' ? settledKey : monthKey(settledKey);
-        const bucket = buckets.get(key);
-        if (!bucket) continue;
-        bucket.supplierPaidAmount += settlement.amount;
-        supplierPaidAmount += settlement.amount;
+        if (settledKey >= firstDay && settledKey < endExclusive) {
+          const key = granularity === 'daily' ? settledKey : monthKey(settledKey);
+          const bucket = buckets.get(key);
+          if (bucket) {
+            bucket.supplierPaidAmount += settlement.amount;
+            supplierPaidAmount += settlement.amount;
+          }
+        }
+        if (cashflowFirstDay && settledKey >= cashflowFirstDay && settledKey < endExclusive) {
+          const bucket = cashflowBuckets.get(settledKey);
+          if (bucket) {
+            bucket.supplierPaidAmount += settlement.amount;
+            cashflowSupplierPaidAmount += settlement.amount;
+          }
+        }
       }
 
       const rows = keys.map((key) => ({ ...buckets.get(key)!, labelKey: key }));
@@ -319,6 +393,18 @@ export class DashboardService {
         series: rows.map((row) => ({ ...row,
           salesAmount: String(row.salesAmount), receivedAmount: String(row.receivedAmount), supplierPaidAmount: String(row.supplierPaidAmount), cashflowNet: String(row.receivedAmount - row.supplierPaidAmount), dueAmount: String(row.dueAmount),
         })),
+        ...(cashflowPeriod ? { cashflow: {
+          period: cashflowPeriod,
+          totals: {
+            receivedAmount: String(cashflowReceivedAmount),
+            supplierPaidAmount: String(cashflowSupplierPaidAmount),
+            cashflowNet: String(cashflowReceivedAmount - cashflowSupplierPaidAmount),
+          },
+          series: cashflowKeys.map((key) => {
+            const row = cashflowBuckets.get(key)!;
+            return { ...row, salesAmount: String(row.salesAmount), receivedAmount: String(row.receivedAmount), supplierPaidAmount: String(row.supplierPaidAmount), cashflowNet: String(row.receivedAmount - row.supplierPaidAmount), dueAmount: String(row.dueAmount), labelKey: key };
+          }),
+        } } : {}),
         dueItems: [...overdueItems, ...upcomingItems].map((item) => ({
           id: item.id, driverId: item.driver.id, driverName: item.driver.fullName, number: item.number,
           amount: String(item.amount), dueAt: item.dueAt,
@@ -331,8 +417,8 @@ export class DashboardService {
       };
     }
 
-    const confirmations = await this.prisma.auditEvent.findMany({
-      where: { eventType: 'WORKFLOW_CONFIRM_INITIAL_PAYMENT', driverId: { not: null } },
+    const confirmations = firstPaymentConfirmationIds.length ? await this.prisma.auditEvent.findMany({
+      where: { id: { in: firstPaymentConfirmationIds.map(({ id }) => id) } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: {
         driverId: true, createdAt: true, details: true,
         driver: {
@@ -342,7 +428,7 @@ export class DashboardService {
           },
         },
       },
-    });
+    }) : [];
     const countedDrivers = new Set<string>();
     for (const event of confirmations) {
       if (!event.driverId || countedDrivers.has(event.driverId)) continue;
@@ -356,7 +442,7 @@ export class DashboardService {
       if (bucket) bucket.salesCount += readConfirmedSaleQuantity(details, payload, event.driver?.products || []);
     }
     const confirmedDrafts = await this.prisma.stageDraft.findMany({
-      where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION },
+      where: { stage: WorkflowStage.PROFORMA_PAYMENT_RESERVATION, payload: { path: ['paymentReceivedConfirmed'], equals: true } },
       select: { driverId: true, payload: true, driver: { select: { createdAt: true, products: { select: { quantity: true } } } } },
     });
     for (const draftRow of confirmedDrafts) {
