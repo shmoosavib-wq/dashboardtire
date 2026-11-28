@@ -221,6 +221,7 @@ html[data-theme="dark"] .status-pill.corrected{background:#3b3422;color:#f0ca79}
 .stage-history-row dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 16px;margin:13px 0 0;padding-top:11px;border-top:1px solid var(--line)}
 .stage-history-row dl>div{min-width:0}.stage-history-row dt{color:#8295a3;font-size:8px}.stage-history-row dd{margin:3px 0 0;color:#365368;font-size:10px;overflow-wrap:anywhere}.stage-history-empty{margin-bottom:0}
 .historical-products{padding:12px 0 4px;border-top:1px solid var(--line)}.historical-products>.section-head{margin-bottom:10px}.historical-products>.section-head h4{margin:0 0 3px;color:var(--ink);font-size:11px}.historical-products>.section-head p{margin:0;color:var(--muted);font-size:9px}.historical-product-row{display:grid;grid-template-columns:1.4fr .7fr 1fr 1fr auto;align-items:end;gap:10px;padding:10px;margin-top:8px;border:1px solid var(--line);border-radius:9px;background:rgba(127,144,160,.035)}.historical-product-row .field{font-size:9px}.historical-product-row .field input{min-height:35px}.stage-history-products{display:grid;gap:6px;margin-top:10px}.stage-history-products>div{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:#f2f6f8;color:#526d80;font-size:9px}.stage-history-products strong{color:#29485d}.historical-product-row .btn{min-height:35px}
+.workflow-dialog.historical-edit-dialog{width:min(980px,100%)}
 html[data-theme="dark"] .persian-calendar{background:#142536;border-color:#334b5d;color:#dce8ef}
 html[data-theme="dark"] .persian-calendar-head{color:#e4edf3}
 html[data-theme="dark"] .persian-calendar-head button,html[data-theme="dark"] .persian-calendar-grid button{background:#192e40;border-color:#344b5e;color:#d5e2e9}
@@ -591,6 +592,10 @@ html[data-theme="dark"] .timeline-older summary{color:#7ae2d4}
 .installment-not-recorded{color:#9aa8b2}
 .installment-expand{gap:8px}
 .installment-expand[aria-expanded="true"]{border-color:#b8e8df;background:var(--teal-soft);color:var(--teal-dark)}
+.installment-row-actions{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+.installment-contact-button{width:34px;min-width:34px;height:34px;min-height:34px;padding:0;display:inline-grid;place-items:center;border-color:#b9e9e1;background:#eaf8f5;color:#008f80}
+.installment-contact-button svg{width:16px;height:16px}
+.installment-contact-button:hover{border-color:#00a995;background:#d9f3ee;color:#007d70}
 .installment-loading{min-height:220px;display:grid;place-items:center}
 .installment-empty{min-height:220px;padding:25px;border:1px dashed var(--line);border-radius:12px;background:var(--paper);text-align:center}
 .installment-empty strong{font-size:14px;color:var(--ink)}
@@ -599,6 +604,21 @@ html[data-theme="dark"] .timeline-older summary{color:#7ae2d4}
 .installment-payment-context{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 18px;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:#f8fafb;color:var(--muted);font-size:12px}
 .installment-payment-context strong{color:var(--ink);font-size:13px}
 .installment-payment-modal .field{margin-bottom:15px}
+.installment-contact-modal{width:min(520px,100%)}
+.installment-contact-modal textarea{width:100%;min-height:100px;resize:vertical;border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:var(--paper);color:var(--ink);font:inherit;font-size:12px;line-height:1.8}
+.installment-contact-context{display:grid;gap:7px;margin:0 0 15px;padding:12px 14px;border:1px solid #f0d9a5;border-radius:9px;background:#fffaf0;color:#7b602b;font-size:11px}
+.installment-contact-context strong{color:#6e4e12;font-size:12px}
+.installment-contact-hint{display:block;margin:0 0 14px;color:var(--muted);font-size:10px;line-height:1.8}
+.installment-contact-history{display:grid;gap:9px;margin:0 16px 16px;padding:0 4px;color:var(--ink)}
+.installment-contact-history-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.installment-contact-history-heading>strong{font-size:12px}
+.installment-add-note{min-height:30px;padding:4px 10px;border-color:#b9e9e1;color:#008f80}
+.installment-contact-history article{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--paper)}
+.installment-contact-history article>div{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:10px}
+.installment-contact-history time{direction:rtl}
+.installment-contact-history p{margin:7px 0;color:var(--ink);font-size:11px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
+.installment-contact-history small{color:var(--muted);font-size:9px}
+.timeline-event p{line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
 html[data-theme="dark"] .installment-filter.active{background:#173c38;border-color:#286057;color:#79dfcf}
 html[data-theme="dark"] .installment-filter.active span{background:#23534b;color:#9ce7d9}
 html[data-theme="dark"] .installment-filter span{background:#263a4b;color:#b5c5d0}
@@ -606,6 +626,11 @@ html[data-theme="dark"] .installment-detail-row>td{background:#142637!important}
 html[data-theme="dark"] .installment-child-overdue td{background:#321f27}
 html[data-theme="dark"] .installment-child-due-soon td{background:#332b1c}
 html[data-theme="dark"] .installment-payment-context{background:#142637}
+html[data-theme="dark"] .installment-contact-button{border-color:#286057;background:#173c38;color:#79dfcf}
+html[data-theme="dark"] .installment-contact-button:hover{border-color:#3d8c7d;background:#1d4a43;color:#a0eee0}
+html[data-theme="dark"] .installment-add-note{border-color:#286057;color:#79dfcf}
+html[data-theme="dark"] .installment-contact-context{border-color:#6a542d;background:#2e291f;color:#d8bf89}
+html[data-theme="dark"] .installment-contact-context strong{color:#f1ce82}
 html[data-theme="dark"] .archive-tag{background:#2a3945;color:#bbc6ce}
 @media(max-width:920px){.installment-toolbar{align-items:stretch;flex-direction:column}.installment-search{width:100%}}
 @media(max-width:760px){.installment-page{gap:18px}.installment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.installment-summary>div{min-height:65px;padding:10px 12px}.installment-summary>div:nth-child(2){border-left:0}.installment-summary>div:nth-child(-n+2){border-bottom:1px solid var(--line)}.installment-summary span{font-size:10px}.installment-summary strong{font-size:17px}.installment-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.installment-filter{justify-content:center;padding-inline:7px;font-size:11px}.installment-detail-head{align-items:flex-start;padding:14px 12px 10px}.installment-child-wrap{margin:0 8px 10px}}

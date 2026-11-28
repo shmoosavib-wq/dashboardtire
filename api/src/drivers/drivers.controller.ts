@@ -3,7 +3,7 @@ import { WorkflowStage } from '@prisma/client';
 import { AuthGuard } from '../common/auth.guard';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth';
 import { RolesGuard } from '../common/roles.guard';
-import { ArchiveDriverDto, CreateDriverDto, RecordInstallmentPaymentDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
+import { ArchiveDriverDto, CreateDriverDto, RecordInstallmentContactDto, RecordInstallmentPaymentDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
 import { DriversService } from './drivers.service';
 import { stageLabels } from './workflow';
 
@@ -70,6 +70,15 @@ export class DriversController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.drivers.recordInstallmentPayment(id, installmentId, body, actor);
+  }
+
+  @Post(':id/installments/contact-attempts')
+  recordInstallmentContact(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: RecordInstallmentContactDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.drivers.recordInstallmentContact(id, body, actor);
   }
 
   @Post(':id/installments')

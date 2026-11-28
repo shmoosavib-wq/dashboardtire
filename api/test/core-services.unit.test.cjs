@@ -41,6 +41,20 @@ test('dashboard sales count represents tire pairs sold, not confirmed driver cas
   assert.equal(result.series.reduce((sum, day) => sum + day.salesCount, 0), 7);
 });
 
+test('driver search normalizes Arabic and Persian letters and digits before querying', async () => {
+  let searchQuery;
+  let listQuery;
+  const service = new DriversService({
+    $queryRaw: async (query) => { searchQuery = query; return [{ id: 'driver-1' }]; },
+    driver: { findMany: async (query) => { listQuery = query; return [{ id: 'driver-1', drafts: [], products: [] }]; } },
+  });
+
+  await service.list({ search: '\u0646\u064a\u0627\u0632\u064a \u0643\u0648\u062f \u0661\u0662' });
+
+  assert.ok(searchQuery.values.includes('\u0646\u06cc\u0627\u0632\u06cc \u06a9\u0648\u062f 12'));
+  assert.deepEqual(listQuery.where.id, { in: ['driver-1'] });
+});
+
 test('historical delivery cases with confirmed payment appear in installments without a legacy audit event', async () => {
   let query;
   const service = new DriversService({

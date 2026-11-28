@@ -64,6 +64,19 @@ export function asciiDigits(value: string) {
   });
 }
 
+export function normalizeSearchText(value: string) {
+  return asciiDigits(value.normalize('NFKC'))
+    .replace(/[\u0643\u064a\u0649\u0623\u0625\u0622\u0671\u0629\u06c0]/g, (char) => ({
+      '\u0643': '\u06a9', '\u064a': '\u06cc', '\u0649': '\u06cc',
+      '\u0623': '\u0627', '\u0625': '\u0627', '\u0622': '\u0627', '\u0671': '\u0627',
+      '\u0629': '\u0647', '\u06c0': '\u0647',
+    }[char] || char))
+    .replace(/[\u064b-\u065f\u0670\u0640\u200c\u200d]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('fa-IR');
+}
+
 export function normalizeIntegerInput(value: string) {
   return asciiDigits(value).replace(/[^\d]/g, '');
 }

@@ -3,7 +3,7 @@ import { stageList, type AuditEvent } from '../model';
 import { categoryNames, actionNames } from './labels';
 
 function HistoryTab({ events }: { events: AuditEvent[] }) {
-  const renderEvent = (event: AuditEvent) => <article className="timeline-event" key={event.id}><span className="timeline-dot" /><div><b>{actionNames[event.eventType] || event.eventType}</b><p>{event.actor?.name || 'سامانه'}{formatDetails(event.details) ? ' · ' + formatDetails(event.details) : ''}</p><small>{displayDateTime(event.createdAt)}</small></div></article>;
+  const renderEvent = (event: AuditEvent) => <article className="timeline-event" key={event.id}><span className="timeline-dot" /><div><b>{actionNames[event.eventType] || event.eventType}</b><p>{event.actor?.name || 'سامانه'}{formatDetails(event.details, event.eventType) ? ' · ' + formatDetails(event.details, event.eventType) : ''}</p><small>{displayDateTime(event.createdAt)}</small></div></article>;
   return <div className="tab-content"><div className="section-head"><div><div className="eyebrow">ردپای کامل پرونده</div><h3>تاریخچه فعالیت‌ها</h3><p>رویدادها به ترتیب زمان ثبت شده‌اند و امکان ویرایش دستی ندارند.</p></div><span className="count-chip">{faNumber(events.length)} رویداد</span></div>
     {!events.length ? <div className="empty-state compact">هنوز رویدادی ثبت نشده است.</div> : <>
       <div className="timeline">{events.slice(0, 5).map(renderEvent)}</div>
@@ -12,8 +12,13 @@ function HistoryTab({ events }: { events: AuditEvent[] }) {
   </div>;
 }
 
-function formatDetails(details: Record<string, unknown>) {
-  if (details.note && typeof details.note === 'string') return details.note;
+function formatDetails(details: Record<string, unknown>, eventType: string) {
+  if (details.note && typeof details.note === 'string') {
+    if (eventType === 'INSTALLMENT_CONTACT_ATTEMPT' && typeof details.installmentNumber === 'number') {
+      return `قسط ${faNumber(details.installmentNumber)} · ${details.note}`;
+    }
+    return details.note;
+  }
   if (Array.isArray(details.changedKeys)) {
     const stageName = stageList.find((stage) => stage.id === details.stage)?.title;
     return (stageName ? `مرحلهٔ ${stageName} · ` : '') + 'فیلدهای تغییرکرده: ' + (details.changedKeys as string[]).join('، ');

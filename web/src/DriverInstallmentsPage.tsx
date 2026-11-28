@@ -1,14 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, asciiDigits, displayDate, faDigits, faNumber, formatMoney, jsonBody, normalizeIntegerInput } from './api';
+import { api, asciiDigits, displayDate, faDigits, faNumber, formatMoney, jsonBody, normalizeIntegerInput, normalizeSearchText } from './api';
 import LoadingIndicator from './LoadingIndicator';
 import PersianDatePicker from './driver-panel/PersianDatePicker';
 import TablePagination from './TablePagination';
 
 type Installment = { id: string; number: number; amount: string; dueAt: string; paidAt: string | null; paidBy: { id: string; name: string } | null };
+type ContactAttempt = { id: string; note: string; createdAt: string; actorName: string; installmentNumbers: number[] };
 type InstallmentDriver = {
   id: string; fullName: string; mobile: string; archivedAt: string | null;
   initialPaymentAmount: string | null; initialPaymentDate: string | null;
   needsPlan: boolean;
+  contactAttempts: ContactAttempt[];
   products: { id: string; title: string; quantity: number; saleUnitPrice: string | null }[];
   installments: Installment[];
 };
@@ -29,6 +31,12 @@ function isoDate(value: string) {
 function displayInstallmentDate(value?: string | null) {
   if (!value) return '—';
   return displayDate(`${isoDate(value)}T12:00:00.000Z`);
+}
+
+function displayTimestamp(value: string) {
+  return new Intl.DateTimeFormat('fa-IR-u-nu-arabext', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Tehran',
+  }).format(new Date(value));
 }
 
 function isOverdue(installment: Installment, today: string) {
@@ -88,6 +96,47 @@ function RecordPaymentModal({ driver, installment, onClose, onSaved }: {
   </div>;
 }
 
+function RecordContactModal({ driver, installment, onClose, onSaved }: {
+  driver: InstallmentDriver; installment: Installment; onClose: () => void; onSaved: (note: string) => Promise<void>;
+}) {
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedNote = note.trim();
+    if (!trimmedNote || trimmedNote.length > 1000) {
+      setError('یادداشت تماس را وارد کنید (حداکثر ۱۰۰۰ نویسه).');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try { await onSaved(trimmedNote); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'ثبت پیگیری تماس انجام نشد.'); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="overlay" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+    <section className="modal compact-modal installment-contact-modal" role="dialog" aria-modal="true" aria-labelledby="installment-contact-title">
+      <div className="modal-head">
+        <div><div className="eyebrow">پیگیری قسط نزدیک سررسید</div><h2 id="installment-contact-title">ثبت نتیجه تماس</h2><p>{driver.fullName} · {faDigits(driver.mobile)}</p></div>
+        <button type="button" className="icon-button" onClick={onClose} disabled={busy} aria-label="بستن">×</button>
+      </div>
+      <div className="installment-contact-context">
+        <strong>قسط {faNumber(installment.number)}</strong>
+        <span>سررسید {displayInstallmentDate(installment.dueAt)} · {formatMoney(installment.amount)} تومان</span>
+      </div>
+      <form onSubmit={(event) => void submit(event)}>
+        <label className="field">نتیجه تماس / یادداشت<textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} rows={4} placeholder="نتیجه تماس یا زمان پیگیری بعدی را بنویسید…" disabled={busy} required /></label>
+        <small className="installment-contact-hint">زمان ثبت و نام کاربر واردشده به‌صورت خودکار ذخیره می‌شود.</small>
+        {error && <div className="alert error" role="alert">{error}</div>}
+        <div className="modal-actions"><button type="button" className="btn" onClick={onClose} disabled={busy}>انصراف</button><button type="submit" className="btn primary" disabled={busy || !note.trim()}>{busy ? 'در حال ثبت…' : 'ثبت یادداشت تماس'}</button></div>
+      </form>
+    </section>
+  </div>;
+}
+
 export default function DriverInstallmentsPage({ notify }: { notify: (message: string) => void }) {
   const [drivers, setDrivers] = useState<InstallmentDriver[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +147,7 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [paymentTarget, setPaymentTarget] = useState<{ driver: InstallmentDriver; installment: Installment } | null>(null);
+  const [contactTarget, setContactTarget] = useState<{ driver: InstallmentDriver; installment: Installment } | null>(null);
   const [today, setToday] = useState(tehranToday);
   const [creatingPlanId, setCreatingPlanId] = useState<string | null>(null);
   const [planError, setPlanError] = useState('');
@@ -124,9 +174,9 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
   }, [drivers]);
 
   const filteredDrivers = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase();
+    const term = normalizeSearchText(search);
     return drivers.filter((driver) => {
-      const matchesSearch = !term || driver.fullName.toLocaleLowerCase().includes(term) || driver.mobile.includes(term) || driver.products.some((item) => item.title.toLocaleLowerCase().includes(term));
+      const matchesSearch = !term || normalizeSearchText(driver.fullName).includes(term) || normalizeSearchText(driver.mobile).includes(term) || driver.products.some((item) => normalizeSearchText(item.title).includes(term));
       const hasUnpaid = driver.installments.some((item) => !item.paidAt);
       const allPaid = driver.installments.length > 0 && driver.installments.every((item) => item.paidAt);
       return matchesSearch && (filter === 'all' || (filter === 'unpaid' && hasUnpaid) || (filter === 'paid' && allPaid));
@@ -147,6 +197,17 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
     setPaymentTarget(null);
     await load();
     notify(amountChanged ? 'مبلغ پرداخت‌شده اصلاح و ماندهٔ اقساط بازتوزیع شد.' : 'تاریخ پرداخت قسط ثبت شد.');
+  }
+
+  async function saveContact(note: string) {
+    if (!contactTarget) return;
+    await api(`/drivers/${contactTarget.driver.id}/installments/contact-attempts`, {
+      method: 'POST', body: jsonBody({ installmentId: contactTarget.installment.id, note }),
+    });
+    setExpandedId(contactTarget.driver.id);
+    setContactTarget(null);
+    await load();
+    notify('یادداشت تماس و اطلاعات پیگیری ثبت شد.');
   }
 
   async function createPlan(driver: InstallmentDriver) {
@@ -191,7 +252,8 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
             <thead><tr><th>#</th><th>راننده</th><th>کالا</th><th>پرداخت اولیه</th><th>تعداد اقساط</th><th>وضعیت</th><th>جزئیات</th></tr></thead>
             <tbody>{pageDrivers.map((driver, index) => {
               const overdue = driver.installments.some((item) => isOverdue(item, today));
-              const dueSoon = !overdue && driver.installments.some((item) => isDueSoon(item, today));
+              const dueSoonInstallments = driver.installments.filter((item) => isDueSoon(item, today));
+              const dueSoon = !overdue && dueSoonInstallments.length > 0;
               const initialPaymentPaid = Boolean(driver.initialPaymentAmount && BigInt(driver.initialPaymentAmount) > 0n);
               const paidCount = driver.installments.filter((item) => item.paidAt).length + Number(initialPaymentPaid);
               const totalPaymentCount = driver.installments.length + Number(initialPaymentPaid);
@@ -204,9 +266,9 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
                   <td>{driver.initialPaymentAmount ? <><strong>{formatMoney(driver.initialPaymentAmount)} تومان</strong><small className="installment-subdate">{displayInstallmentDate(driver.initialPaymentDate)}</small></> : '—'}</td>
                   <td>{driver.needsPlan ? 'برنامه ثبت نشده' : <>{faNumber(paidCount)} از {faNumber(totalPaymentCount)} پرداخت‌شده</>}</td>
                   <td>{driver.needsPlan ? <span className="status-pill">نیازمند ساخت برنامه</span> : overdue ? <span className="installment-status overdue"><i className="overdue-pulse" />سررسید گذشته</span> : dueSoon ? <span className="installment-status due-soon"><i className="due-soon-pulse" />سررسید نزدیک</span> : paidCount === totalPaymentCount ? <span className="status-pill success">تکمیل‌شده</span> : <span className="status-pill">در جریان</span>}</td>
-                  <td>{driver.needsPlan
+                  <td><div className="installment-row-actions">{dueSoon && !driver.needsPlan && <button type="button" className="btn installment-contact-button" title={`ثبت یادداشت تماس برای قسط ${faNumber(dueSoonInstallments[0].number)}`} aria-label={`ثبت یادداشت تماس برای قسط ${faNumber(dueSoonInstallments[0].number)} راننده ${driver.fullName}`} onClick={() => setContactTarget({ driver, installment: dueSoonInstallments[0] })}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M7.1 3.8h2.8l1.4 4-1.8 1.5a15.4 15.4 0 0 0 5.2 5.2l1.5-1.8 4 1.4v2.8c0 1-.8 1.8-1.8 1.8A14.6 14.6 0 0 1 5.3 5.6c0-1 .8-1.8 1.8-1.8Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg></button>}{driver.needsPlan
                     ? <button type="button" className="btn small primary" disabled={creatingPlanId !== null} onClick={() => void createPlan(driver)}>{creatingPlanId === driver.id ? 'در حال ساخت…' : 'ساخت برنامه'}</button>
-                    : <button type="button" className="btn small installment-expand" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : driver.id)}>{expanded ? 'بستن جزئیات' : 'مشاهده اقساط'}<span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>}</td>
+                    : <button type="button" className="btn small installment-expand" aria-expanded={expanded} onClick={() => setExpandedId(expanded ? null : driver.id)}>{expanded ? 'بستن جزئیات' : 'مشاهده اقساط'}<span aria-hidden="true">{expanded ? '⌃' : '⌄'}</span></button>}</div></td>
                 </tr>
                 {expanded && <tr className="installment-detail-row"><td colSpan={7}>
                   <div className="installment-detail-head"><div><strong>برنامهٔ پرداخت {driver.fullName}</strong><small>تاریخ سررسید و پرداخت واقعی در ستون‌های جدا ثبت می‌شوند.</small></div><span>{faNumber(driver.installments.length)} قسط</span></div>
@@ -220,11 +282,16 @@ export default function DriverInstallmentsPage({ notify }: { notify: (message: s
                         <td>{item.paidAt ? <button type="button" className="btn small" onClick={() => setPaymentTarget({ driver, installment: item })}>ویرایش</button> : <button type="button" className="btn small primary" onClick={() => setPaymentTarget({ driver, installment: item })}>ثبت پرداخت</button>}</td>
                       </tr>;
                     })}</tbody></table></div>
+                  {(driver.contactAttempts.length > 0 || (dueSoon && !driver.needsPlan)) && <section className="installment-contact-history" aria-label="سوابق تماس">
+                    <div className="installment-contact-history-heading"><strong>یادداشت‌های پیگیری</strong>{dueSoon && !driver.needsPlan && <button type="button" className="btn small installment-add-note" onClick={() => setContactTarget({ driver, installment: dueSoonInstallments[0] })}>یادداشت جدید</button>}</div>
+                    {driver.contactAttempts.map((attempt) => <article key={attempt.id}><div><span>{attempt.actorName}</span><time dateTime={attempt.createdAt}>{displayTimestamp(attempt.createdAt)}</time></div><p>{attempt.note}</p><small>پیگیری قسط {attempt.installmentNumbers.map((number) => faNumber(number)).join('، ')}</small></article>)}
+                  </section>}
                 </td></tr>}
               </Fragment>;
             })}</tbody>
           </table></div>}
     {!loading && !loadError && filteredDrivers.length > 0 && <TablePagination page={currentPage} pageSize={pageSize} total={filteredDrivers.length} itemLabel="راننده" onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size); }} />}
     {paymentTarget && <RecordPaymentModal driver={paymentTarget.driver} installment={paymentTarget.installment} onClose={() => setPaymentTarget(null)} onSaved={savePayment} />}
+    {contactTarget && <RecordContactModal driver={contactTarget.driver} installment={contactTarget.installment} onClose={() => setContactTarget(null)} onSaved={saveContact} />}
   </div>;
 }

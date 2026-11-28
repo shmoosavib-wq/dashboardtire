@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import { DocumentCategory, UserRole, WorkflowStage } from '@prisma/client';
+import { DocumentCategory, Prisma, UserRole, WorkflowStage } from '@prisma/client';
 import type { AuthenticatedUser } from '../common/auth';
 import { PrismaService } from '../prisma.service';
 import type { ArchiveDriverDto, CreateDriverDto, RecordInstallmentPaymentDto, SaveDraftDto, StoreSettlementDto, WorkflowActionDto } from './drivers.dto';
@@ -7,6 +7,31 @@ import { dateOnly, nonEmptyText, nonNegativeInteger, positiveMoney, requireRole,
 
 type JsonObject = Record<string, unknown>;
 const INSTALLMENT_COUNT = 3;
+const SEARCH_FROM = '\u0643\u064a\u0649\u0623\u0625\u0622\u0671\u0629\u06c0\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u06f0\u06f1\u06f2\u06f3\u06f4\u06f5\u06f6\u06f7\u06f8\u06f9';
+const SEARCH_TO = '\u06a9\u06cc\u06cc\u0627\u0627\u0627\u0627\u0647\u064701234567890123456789';
+const SEARCH_MARKS = '[\u064b-\u065f\u0670\u0640]';
+
+function normalizeSearchTerm(value: string) {
+  return value.normalize('NFKC')
+    .replace(/[\u0643\u064a\u0649\u0623\u0625\u0622\u0671\u0629\u06c0]/g, (char) => ({
+      '\u0643': '\u06a9', '\u064a': '\u06cc', '\u0649': '\u06cc',
+      '\u0623': '\u0627', '\u0625': '\u0627', '\u0622': '\u0627', '\u0671': '\u0627',
+      '\u0629': '\u0647', '\u06c0': '\u0647',
+    }[char] || char))
+    .replace(/[\u0660-\u0669]/g, (char) => String(char.charCodeAt(0) - 0x0660))
+    .replace(/[\u06f0-\u06f9]/g, (char) => String(char.charCodeAt(0) - 0x06f0))
+    .replace(/[\u064b-\u065f\u0670\u0640\u200c\u200d]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('fa-IR');
+}
+
+function normalizedSearchColumn(column: 'fullName' | 'mobile' | 'nationalId') {
+  return Prisma.sql`regexp_replace(
+    replace(replace(translate(lower(coalesce(${Prisma.raw(`"${column}"`)}, '')), ${SEARCH_FROM}, ${SEARCH_TO}), chr(8204), ''), chr(8205), ''),
+    ${SEARCH_MARKS}, '', 'g'
+  )`;
+}
 
 function isAfterInitialPayment(stage: WorkflowStage): boolean {
   return stage === WorkflowStage.CONTRACT_CHEQUE
@@ -110,6 +135,19 @@ export class DriversService {
       },
     });
 
+    const contactEvents = drivers.length ? await this.prisma.auditEvent.findMany({
+      where: { driverId: { in: drivers.map(({ id }) => id) }, eventType: 'INSTALLMENT_CONTACT_ATTEMPT' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, driverId: true, details: true, createdAt: true, actor: { select: { name: true } } },
+    }) : [];
+    const contactEventsByDriver = new Map<string, typeof contactEvents>();
+    for (const event of contactEvents) {
+      if (!event.driverId) continue;
+      const events = contactEventsByDriver.get(event.driverId) || [];
+      events.push(event);
+      contactEventsByDriver.set(event.driverId, events);
+    }
+
     return drivers.flatMap(({ drafts, products, installments, auditEvents, ...driver }) => {
       const payload = (drafts[0]?.payload || {}) as JsonObject;
       const confirmationDetails = (auditEvents[0]?.details || {}) as JsonObject;
@@ -172,6 +210,18 @@ export class DriversService {
           : typeof confirmationDetails.paymentDate === 'string' ? confirmationDetails.paymentDate : null,
         needsPlan,
         products: displayProducts,
+        contactAttempts: (contactEventsByDriver.get(driver.id) || []).map((event) => {
+          const details = event.details as JsonObject;
+          return {
+            id: event.id,
+            note: typeof details.note === 'string' ? details.note : '',
+            createdAt: event.createdAt,
+            actorName: event.actor?.name || 'کاربر حذف‌شده',
+            installmentNumbers: Array.isArray(details.installmentNumbers)
+              ? details.installmentNumbers
+              : typeof details.installmentNumber === 'number' ? [details.installmentNumber] : [],
+          };
+        }),
         installments: installments.map((installment) => ({
           id: installment.id,
           number: installment.number,
@@ -186,16 +236,29 @@ export class DriversService {
 
   async list(query: { search?: string; stage?: WorkflowStage; archived?: string }) {
     if (query.stage && !stages.includes(query.stage)) throw new BadRequestException('مرحله معتبر نیست.');
-    const search = query.search?.trim();
+    const rawSearch = query.search?.trim();
+    let matchingDriverIds: string[] | undefined;
+    if (rawSearch) {
+      const search = normalizeSearchTerm(rawSearch);
+      if (!search) matchingDriverIds = [];
+      else {
+        const [fullName, mobile, nationalId] = [
+          normalizedSearchColumn('fullName'), normalizedSearchColumn('mobile'), normalizedSearchColumn('nationalId'),
+        ];
+        const matches = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT "id" FROM "Driver"
+          WHERE strpos(${fullName}, ${search}) > 0
+            OR strpos(${mobile}, ${search}) > 0
+            OR strpos(${nationalId}, ${search}) > 0
+        `);
+        matchingDriverIds = matches.map(({ id }) => id);
+      }
+    }
     const drivers = await this.prisma.driver.findMany({
       where: {
         archivedAt: query.archived === 'true' ? { not: null } : null,
         currentStage: query.stage,
-        ...(search ? { OR: [
-          { fullName: { contains: search, mode: 'insensitive' } },
-          { mobile: { contains: search } },
-          { nationalId: { contains: search } },
-        ] } : {}),
+        ...(matchingDriverIds ? { id: { in: matchingDriverIds } } : {}),
       },
       orderBy: { updatedAt: 'desc' },
       include: {
@@ -819,6 +882,42 @@ export class DriversService {
       });
       return { ...updated, amount: String(updated.amount) };
     }, { isolationLevel: 'Serializable' });
+  }
+
+  async recordInstallmentContact(id: string, input: { installmentId: string; note: string }, actor: AuthenticatedUser) {
+    requireRole(actor, UserRole.LEGAL_FINANCE);
+    await this.getActiveDriver(id);
+    const note = input.note.trim();
+    if (!note || note.length > 1000) throw new BadRequestException('یادداشت تماس باید بین ۱ تا ۱۰۰۰ نویسه باشد.');
+
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    const installment = await this.prisma.driverInstallment.findFirst({
+      where: { id: input.installmentId, driverId: id },
+      select: { id: true, number: true, dueAt: true, paidAt: true },
+    });
+    if (!installment) throw new NotFoundException('قسط موردنظر پیدا نشد.');
+    const daysUntilDue = (Date.parse(`${installment.dueAt.toISOString().slice(0, 10)}T00:00:00.000Z`) - Date.parse(`${today}T00:00:00.000Z`)) / 86_400_000;
+    if (installment.paidAt || daysUntilDue < 0 || daysUntilDue > 3) {
+      throw new ConflictException('ثبت یادداشت تماس فقط برای قسط پرداخت‌نشده با سررسید ۳ روز آینده ممکن است.');
+    }
+
+    const event = await this.prisma.auditEvent.create({
+      data: {
+        driverId: id,
+        actorId: actor.id,
+        eventType: 'INSTALLMENT_CONTACT_ATTEMPT',
+        details: {
+          note,
+          installmentId: installment.id,
+          installmentNumber: installment.number,
+          installmentNumbers: [installment.number],
+          dueAt: installment.dueAt.toISOString(),
+        },
+      },
+    });
+    return { id: event.id, createdAt: event.createdAt };
   }
 
   private async getActiveDriver(id: string) {

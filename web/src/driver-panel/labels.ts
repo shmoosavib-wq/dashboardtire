@@ -22,6 +22,7 @@ const actionNames: Record<string, string> = {
   WORKFLOW_COMPLETE_DELIVERY: 'تحویل و مستندات نهایی شد',
   WORKFLOW_STAGE_REOPENED: 'پرونده به مرحلهٔ قبل برگشت',
   INSTALLMENT_PLAN_CREATED: 'برنامهٔ قسط‌ها ایجاد شد', INSTALLMENT_PAYMENT_RECORDED: 'پرداخت قسط ثبت شد', INSTALLMENT_PAYMENT_UPDATED: 'زمان پرداخت قسط اصلاح شد', INSTALLMENT_PAYMENT_AMOUNT_UPDATED: 'مبلغ پرداخت‌شده و ماندهٔ اقساط اصلاح شد',
+  INSTALLMENT_CONTACT_ATTEMPT: 'نتیجهٔ تماس برای پیگیری قسط ثبت شد',
 };
 const categoryNames: Record<string, string> = {
   IDENTITY: 'مدارک هویتی', CREDIT_RESULT: 'نتیجه اعتبارسنجی', PROFORMA: 'پیش‌فاکتور',
